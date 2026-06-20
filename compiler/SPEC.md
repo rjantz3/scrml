@@ -5,8 +5,8 @@
 > **Amendments applied:** 2026-04-08 — Self-hosting gauntlet R1 findings: §48 relaxed `fn` from "state factory" to "pure function, any return type." §7.3.1 nested function declarations. §7.3.2 default parameter values. §14.3.1 optional struct fields (`= not`). Appendix D: JS standard library access in logic contexts.
 > **Amendments applied:** 2026-04-07 — §49 added: `while`, `do...while`, `break`, `continue` with labeled control flow (E-LOOP-001..E-LOOP-007).
 > **Amendments applied:** 2026-04-07 — §50 added: Assignment as Expression (W-ASSIGN-001, E-ASSIGN-001..E-ASSIGN-004).
-> **Amendments applied:** 2026-04-08 — §51 added: State Transition Rules and `< machine>` state type (E-ENGINE-001..E-ENGINE-012, E-ENGINE-001-RT). §14.4 amended: `transitions {}` block grammar. §6.1 amended: machine-bound reactive variable declaration.
-> **Amendments applied:** 2026-04-08 — §52 added: State Authority Declarations. Two-tier authority model (`<var server>` Tier 2 — V-kill decl form per §6.1.5; `authority=` on `< Type>` Tier 1), compiler-generated sync infrastructure. §6.1.5 grammar: `state-decl` production carries the `server` decl-attr. §11.3.5 added: `protect=` / `authority=` relationship. E-AUTH-001..E-AUTH-005, W-AUTH-001.
+> **Amendments applied:** 2026-04-08 — §51 added: State Transition Rules and `<machine>` state type (E-ENGINE-001..E-ENGINE-012, E-ENGINE-001-RT). §14.4 amended: `transitions {}` block grammar. §6.1 amended: machine-bound reactive variable declaration.
+> **Amendments applied:** 2026-04-08 — §52 added: State Authority Declarations. Two-tier authority model (`<var server>` Tier 2 — V-kill decl form per §6.1.5; `authority=` on `<Type>` Tier 1), compiler-generated sync infrastructure. §6.1.5 grammar: `state-decl` production carries the `server` decl-attr. §11.3.5 added: `protect=` / `authority=` relationship. E-AUTH-001..E-AUTH-005, W-AUTH-001.
 > **Amendments applied:** 2026-04-08 — §51 revised: `for EnumTypeName` → `for TypeName` (machines govern structs too). `self.*` in guards, `[label]` named clauses, `* => *` wildcard rules, E-ENGINE-013. Radical doubt debate Approach C.
 > **Amendments applied:** 2026-04-09 — §4.4 rewritten: three closer forms → two (`</tagname>` explicit, `</>` inferred). §4.8 deleted (bare `/` disambiguation no longer needed). §3.1 table updated. §3.2 E-CTX-002 wording updated. §4.5, §4.9 updated. §34 error codes updated. Appendix E added: migration guide. All examples updated throughout.
 > **Amendments applied:** 2026-04-08 — §53 added: Inline Type Predicates. Stateless value constraints (`number(>0 && <10000)`, `string(email)`), three-zone SPARK enforcement, named shape registry, `bind:value` HTML attribute generation. E-CONTRACT-001..E-CONTRACT-004-WARN.
@@ -93,7 +93,7 @@
 48. [The `fn` Keyword — Pure Functions](#48-the-fn-keyword--pure-functions)
 49. [`while` Loops, `do...while`, `break`, and `continue`](#49-while-loops-dowhile-break-and-continue)
 50. [Assignment as Expression](#50-assignment-as-expression)
-51. [State Transition Rules and `< machine>` State Type](#51-state-transition-rules-and--machine-state-type)
+51. [State Transition Rules and `<machine>` State Type](#51-state-transition-rules-and--machine-state-type)
 52. [State Authority Declarations](#52-state-authority-declarations)
 53. [Inline Type Predicates](#53-inline-type-predicates)
 54. [Nested Substates and State-Local Transitions](#54-nested-substates-and-state-local-transitions)
@@ -246,7 +246,7 @@ scrml source is parsed as a nested stack of contexts. Each context type has dist
 
 | Context | Delimiter (open) | Delimiter (close) | Parent context(s) |
 |---|---|---|---|
-| Markup/State | `<tagname>` / `< statename>` | `</>` or `</tagname>` (closer forms) | Top-level, any markup/state |
+| Markup/State | `<tagname>` / `<statename>` | `</>` or `</tagname>` (closer forms) | Top-level, any markup/state |
 | Logic | `${` | `}` | Markup, State |
 | SQL | `?{` | `}` | Logic |
 | CSS inline | `#{` | `}` | Markup, State |
@@ -424,7 +424,7 @@ explicit-close ::= '</' identifier '>'
 
 **Worked example — valid (state block):**
 ```scrml
-< db src="db.sql" tables="users">
+<db src="db.sql" tables="users">
     <p>Content</p>
 </db>
 ```
@@ -454,7 +454,7 @@ inferred-close ::= '</>'
 
 **Worked example — valid (nested):**
 ```scrml
-< db src="db.sql" tables="users">
+<db src="db.sql" tables="users">
     <ul>${
         function loadList() {
             for (name of ?{`SELECT userName FROM users`}.all()) {
@@ -464,7 +464,7 @@ inferred-close ::= '</>'
     }</>
 </>
 ```
-The first `</>` closes `<ul>`. The second `</>` closes the `< db>` state block.
+The first `</>` closes `<ul>`. The second `</>` closes the `<db>` state block.
 
 **Worked example — error:**
 ```scrml
@@ -533,11 +533,11 @@ scrml defines `//` as the universal single-line comment syntax (§27). The block
 
 **S88 amendment note (2026-05-13):** the prior `SHALL NOT handle <!-- -->` wording (pre-S87) was authored before the BS-layer comment-skip mechanism shipped. Per S86 ratification ("BS-layer over SPEC retreat" — when SPEC and implementation diverge AND SPEC is design-intent, implementation catches up; conversely when implementation is the right answer, SPEC catches up), this amendment softens §4.7 to MAY-permit `<!-- -->` skip at BS-layer, matching the shipped block-splitter behavior. The skip is conservative: it treats the entire comment span as raw content; it does not interpret content inside the comment for delimiter recognition. `/* */` remains forbidden at BS-layer — those genuinely belong to per-context tokenizers (CSS, JS) and crossing the BS layer would create false context-mode transitions inside non-comment code.
 
-**Rationale:** Without this rule, a commented-out delimiter sequence such as `// < db src="db.sql">` or `// ${` would be scanned by the block splitter and would open a spurious block context, corrupting the block stream and all downstream passes.
+**Rationale:** Without this rule, a commented-out delimiter sequence such as `// <db src="db.sql">` or `// ${` would be scanned by the block splitter and would open a spurious block context, corrupting the block stream and all downstream passes.
 
 **Worked example — valid (commented-out tag):**
 ```scrml
-// < db src="db.sql">
+// <db src="db.sql">
 <p>Content</>
 ```
 The block splitter encounters `//` on line 1 and suppresses all delimiter scanning for that line. The `<` and `db` on line 1 are raw content. Line 2 is scanned normally; `<p>` opens an HTML element.
@@ -637,7 +637,7 @@ In all other contexts, `is` is a valid identifier.
 **Added:** 2026-04-17 — ratified by radical-doubt debate (see
 `scrml-support/design-insights.md`, "Machine cohesion: opener + guard keyword").
 
-`given` is the guard keyword used inside `< machine>` rule bodies (§51.3.2). It is
+`given` is the guard keyword used inside `<machine>` rule bodies (§51.3.2). It is
 **semantically distinct** from the runtime-Boolean `if` keyword used in markup `if=`
 attributes (§17.1), logic `if (cond) { ... }` control flow, and `else-if=`. The
 distinction is intentional and load-bearing:
@@ -5357,7 +5357,7 @@ The following are structural scopes for the purposes of hoisting:
 - `<program>` body
 - Engine body (inside `<engine for=Type initial=...>`)
 - Channel body (inside `<channel name=...>`)
-- Schema body (inside `< schema>`)
+- Schema body (inside `<schema>`)
 
 State declarations inside a logic context `${ }` do NOT hoist beyond the `${ }` block. They follow declaration-before-use rules within their block.
 
@@ -5527,11 +5527,11 @@ All synthesized properties are **READ-ONLY**. Writing to them is **E-SYNTHESIZED
 
 This subsection captures content from the former §11 (State Objects and `protect=`) that is not subsumed by §6.1-§6.10. §11 has been folded; its content is distributed to this subsection (cell-declaration-related content) and §52 (authority-related content).
 
-#### 6.12.1 `protect=` on `< db>` State Blocks
+#### 6.12.1 `protect=` on `<db>` State Blocks
 
-The `protect=` attribute on `< db>` state blocks is a field-level access-control mechanism. It governs which fields of a state type are visible to client-side code.
+The `protect=` attribute on `<db>` state blocks is a field-level access-control mechanism. It governs which fields of a state type are visible to client-side code.
 
-`protect=` is DISTINCT from the V5-strict cell declarations in §6.1-§6.3. It applies to database-backed state types (the `< db>` state block) and operates at the type system level, not at the reactive cell level.
+`protect=` is DISTINCT from the V5-strict cell declarations in §6.1-§6.3. It applies to database-backed state types (the `<db>` state block) and operates at the type system level, not at the reactive cell level.
 
 For the full `protect=` specification, see **§52** (State Authority Declarations), which covers:
 - §52.x — Client-visible type vs. full type (the `protect=` split)
@@ -6054,7 +6054,7 @@ When a SQL template contains one or more `${}` expressions, the compiler SHALL:
 
 **Worked example — valid (single parameter):**
 ```scrml
-< db src="auth.sql" tables="users">
+<db src="auth.sql" tables="users">
     ${ function findUser(email) {
         let user = ?{`SELECT id, name FROM users WHERE email = ${email}`}.get();
         return user;
@@ -6124,7 +6124,7 @@ tagged-template, auto-`await`), see §44.
 
 **Worked example — static query:**
 ```scrml
-< db src="db.sql" protect="password" tables="users">
+<db src="db.sql" protect="password" tables="users">
     <ul>${
         function loadList() {
             for (name of ?{`SELECT userName FROM users WHERE canSee = true`}.all()) {
@@ -6137,7 +6137,7 @@ tagged-template, auto-`await`), see §44.
 
 **Worked example — dynamic query with bound parameter:**
 ```scrml
-< db src="db.sql" tables="posts">
+<db src="db.sql" tables="posts">
     ${ function loadPosts(authorId) {
         let posts = ?{`SELECT title, body FROM posts WHERE author_id = ${authorId}`}.all();
         return posts;
@@ -6255,7 +6255,7 @@ write outcome is needed.
 **Worked example — INSERT and capture inserted row via RETURNING:**
 
 ```scrml
-< db src="./app.db" tables="users">
+<db src="./app.db" tables="users">
     ${ function createUser(name, email) {
         let [row] = ?{`INSERT INTO users (name, email) VALUES (${name}, ${email}) RETURNING id`}.all()
         return row.id
@@ -6350,8 +6350,8 @@ See §19.8 for the full `SqlError` type definition and propagation rules.
 ### 8.8 Interaction Notes
 
 - **§11.3 (`protect=`):** A SQL template that selects a protected field in a client-boundary function is E-PROTECT-001. The bound parameter rules of §8.2 apply regardless of whether the function is server-escalated. See §14.8.7 for the TS-level enforcement.
-- **§12 (Route Inference):** Any function containing a `?{}` SQL context that accesses a `< db>` resource is a candidate for server escalation (§12.2 trigger 1). The SQL context itself does not force escalation — the resource access does.
-- **§22.7 (Meta):** `^{}` meta blocks MAY contain `?{}` SQL contexts when the meta block is compile-time evaluated. At runtime, `?{}` SQL contexts require an active `< db>` scope binding.
+- **§12 (Route Inference):** Any function containing a `?{}` SQL context that accesses a `<db>` resource is a candidate for server escalation (§12.2 trigger 1). The SQL context itself does not force escalation — the resource access does.
+- **§22.7 (Meta):** `^{}` meta blocks MAY contain `?{}` SQL contexts when the meta block is compile-time evaluated. At runtime, `?{}` SQL contexts require an active `<db>` scope binding.
 - **§26 (Comments):** `--` SQL comments inside a SQL template are passed through to the database driver as part of the SQL string. The block splitter does not interpret `--` at the `?{}` level; comment handling inside SQL templates is the responsibility of the underlying driver.
 - **§4.12 (Nested `<program>`):** A nested `<program>` with its own `db=` attribute creates
   a new database driver scope. All `?{}` blocks inside the nested `<program>` resolve to
@@ -6964,7 +6964,7 @@ The compiler does not require both branches to contain `lift`.
 
 - **§6.12** — State declaration-related content: cell declarations, structural form, canonical form. See §6 (Reactivity and the V5-Strict Access Model) for the complete treatment of state declarations, field access, and compound state.
 
-- **§52** — Authority-related content: `protect=` field-level access control, compile-time schema reading (`< db>` state blocks), server-escalated function access to protected fields, the explicit `server` function annotation, and the `protect=` + `authority=` interaction.
+- **§52** — Authority-related content: `protect=` field-level access control, compile-time schema reading (`<db>` state blocks), server-escalated function access to protected fields, the explicit `server` function annotation, and the `protect=` + `authority=` interaction.
 
 ### Fold Decision Log
 
@@ -6978,7 +6978,7 @@ The compiler does not require both branches to contain `lift`.
 
 **Cross-references:**
 - §6.12 — Cell-declaration content inherited from §11
-- §52 — Full `protect=` and `< db>` state block specification
+- §52 — Full `protect=` and `<db>` state block specification
 
 ## 12. Route Inference
 
@@ -7492,7 +7492,7 @@ Before this rule, an unrecognized type name fell through `resolveTypeExpr`'s unr
 
 - **`asIs`** — the sanctioned escape hatch, at every locus.
 - **A map KEY position** — owned by `E-MAP-KEY-NOT-COMPARABLE` (§59.4): an undefined key name collapses to a non-comparable `asIs` key, which that check already rejects, so the unknown-name check defers there to avoid a double diagnostic (the `any`-token check still scans keys — `any` is invalid in every position). The map VALUE position is checked.
-- **Machine names** — a machine-typed state cell (`@state: M` where `< machine name=M >` governs it) annotates the cell with the *machine* name, which lives in the machine registry (§51.3), not the type registry; machine names are exempt.
+- **Machine names** — a machine-typed state cell (`@state: M` where `<machine name=M >` governs it) annotates the cell with the *machine* name, which lives in the machine registry (§51.3), not the type registry; machine names are exempt.
 - **`<db>`-block-scoped explicit annotations** — generated DB type names are bound into the scope chain (§14.8), not the `typeRegistry`; db-block-scoped annotations are out of v1 scope (db-types flow via inference, not author annotation).
 - **Type-as-argument idents** (`parseVariant(json, T)`, `formFor for=T`, `schemaFor(T)`, `reflect(T)`) — these are call-argument identifiers / markup `for=` attributes carrying no type annotation; they have their own diagnostics (`E-PARSEVARIANT-TYPE-NOT-ENUM` / `E-FORMFOR-TYPE-NOT-STRUCT` / `E-SCHEMAFOR-TYPE-NOT-STRUCT` / `E-META-003`) and are never reached by this check.
 
@@ -7549,10 +7549,10 @@ type:struct Token {
 }
 ```
 
-When a struct instance is created with `< Token>`, optional fields are initialized to `not`. They may be assigned normally:
+When a struct instance is created with `<Token>`, optional fields are initialized to `not`. They may be assigned normally:
 
 ```scrml
-let tok = < Token>
+let tok = <Token>
 tok.kind = "BLOCK_REF"
 tok.block = someBlock    // optional field assigned
 ```
@@ -7644,7 +7644,7 @@ is backwards-compatible.
 - The `transitions {}` block, when present, SHALL appear after all variant declarations and
   SHALL be the last item in the enum body.
 - An enum type that has a `transitions {}` block SHALL NOT permit a `given` guard inside
-  that block. Guards require a `< machine>` declaration (§51.3, E-ENGINE-010).
+  that block. Guards require a `<machine>` declaration (§51.3, E-ENGINE-010).
 - An enum type without a `transitions {}` block is unrestricted. The absence of the block
   SHALL NOT generate any warning or error.
 
@@ -7676,7 +7676,7 @@ at runtime. The issue is type clarity and developer intent, not runtime correctn
 ```scrml
 type TaskStatus:enum = { Todo | InProgress | Done }
 
-< db src="./app.db" tables="tasks">
+<db src="./app.db" tables="tasks">
     <tasks> = ?{`SELECT * FROM tasks`}.all()
 </>
 
@@ -7773,12 +7773,12 @@ match value {
 
 This section specifies how the TS stage (Stage 6) translates the `ColumnDef[]` arrays
 produced by PA (Stage 4) into named struct types accessible within the lexical scope of a
-`< db>` state block. §11.2 and PIPELINE.md Stage 4 both defer this concern here. PA
+`<db>` state block. §11.2 and PIPELINE.md Stage 4 both defer this concern here. PA
 implementers produce column data; this section governs how TS consumes it.
 
 #### 14.8.1 Type Generation
 
-For each table named in `tables=` on a `< db>` state block, the TS stage SHALL generate
+For each table named in `tables=` on a `<db>` state block, the TS stage SHALL generate
 two named struct types from the PA output:
 
 1. **Full-schema type** — a struct containing one field per column in `fullSchema`.
@@ -7786,11 +7786,11 @@ two named struct types from the PA output:
    (protected fields excluded).
 
 These types are generated at compile time. They do not exist in the source text. They are
-compiler-synthesized names inserted into the scope chain of the enclosing `< db>` block.
+compiler-synthesized names inserted into the scope chain of the enclosing `<db>` block.
 
 The generated types are **nominal**: two independently generated types for the same table
 with identical fields are distinct types and are not interchangeable. Nominality prevents
-accidental cross-block mixing of database row values from different `< db>` blocks even when
+accidental cross-block mixing of database row values from different `<db>` blocks even when
 the underlying schemas happen to be identical.
 
 #### 14.8.2 Naming Convention
@@ -7876,7 +7876,7 @@ the type is `T` alone.
 #### 14.8.4 Scope Insertion
 
 The two generated types for each table SHALL be inserted into the lexical scope of the
-enclosing `< db>` state block. They are accessible to all code within that block and its
+enclosing `<db>` state block. They are accessible to all code within that block and its
 children according to normal lexical scoping rules.
 
 The two views for the same table share the same generated type name. TS resolves which view
@@ -7893,13 +7893,13 @@ during type resolution. Developer code references the type by its single generat
 
 **Normative statements:**
 
-- The TS stage SHALL insert generated table types into the scope chain of the `< db>` state
+- The TS stage SHALL insert generated table types into the scope chain of the `<db>` state
   block node during the scope-building pass, before type resolution of any expression inside
   that block.
 - The generated type name SHALL shadow any user-declared type with the same name in the same
   scope. If a user-declared type and a generated table type share the same name, this SHALL
   be a compile error (E-TYPE-050).
-- Outside the lexical scope of the enclosing `< db>` block, the generated type name SHALL NOT
+- Outside the lexical scope of the enclosing `<db>` block, the generated type name SHALL NOT
   be accessible. It does not leak into sibling or parent scopes.
 - The TS stage SHALL use the `RouteMap` from RI to select the full-schema or client-schema
   view at each expression that resolves to the generated type name. This selection is
@@ -7915,10 +7915,10 @@ during type resolution. Developer code references the type by its single generat
 |            | algorithm of §14.8.3. The column is typed `asIs` and compilation continues.                     |          |
 
 **E-TYPE-050 detail:** This error fires in two distinct cases:
-- Two tables in the same `< db>` block resolve to the same PascalCase name (e.g., both `user`
+- Two tables in the same `<db>` block resolve to the same PascalCase name (e.g., both `user`
   and `User` are listed in `tables=`). The compiler SHALL list both offending table names.
 - A user-declared type in the enclosing scope has the same name as a generated table type.
-  The compiler SHALL identify both the user declaration span and the `< db>` block span.
+  The compiler SHALL identify both the user declaration span and the `<db>` block span.
 
 **E-TYPE-051 detail:** Unrecognized SQLite types are a warning, not an error, because SQLite
 allows arbitrary type strings and the affinity algorithm handles most real-world cases. The
@@ -7930,7 +7930,7 @@ warning message.
 
 **Valid — full schema in server function, client schema in markup:**
 ```scrml
-< db src="auth.sql" protect="passwordHash" tables="users">
+<db src="auth.sql" protect="passwordHash" tables="users">
     ${ function displayName(userId) {
         // This function is client-boundary (no protected field access).
         // In scope: Users (client schema) — id, email, createdAt only.
@@ -7956,18 +7956,18 @@ warning message.
 
 **Invalid — duplicate generated type name (E-TYPE-050):**
 ```scrml
-< db src="app.sql" tables="users, Users">
+<db src="app.sql" tables="users, Users">
 ```
 Both `users` and `Users` resolve to the generated type name `Users` via the PascalCase
 algorithm. The TS stage SHALL emit:
 
 > E-TYPE-050: Tables `users` and `Users` both produce the generated type name `Users` within
-> the same `< db>` block. Rename one table or adjust the schema to remove the collision.
+> the same `<db>` block. Rename one table or adjust the schema to remove the collision.
 
 **Invalid — protected field access on client type (E-PROTECT-001, detected via §14.8.4
 view selection):**
 ```scrml
-< db src="auth.sql" protect="passwordHash" tables="users">
+<db src="auth.sql" protect="passwordHash" tables="users">
     ${ function leakPassword(userId) {
         // Client-boundary function. Users resolves to client schema.
         let row = ?{`SELECT id FROM users WHERE id = ${userId}`}.get();
@@ -8017,8 +8017,8 @@ view selection):**
   protected-column-projection leak (does a server-fn RETURN a row carrying a protected column
   to the client?) is a data-flow / server-fn-return concern for a follow-on (return-boundary /
   `E-ROUTE-003`), not a read-site projection check.
-- **Multiple `< db>` blocks (§11.7):** Each `< db>` block has its own independent generated
-  types. Two `< db>` blocks that both list `users` in `tables=` produce two independent
+- **Multiple `<db>` blocks (§11.7):** Each `<db>` block has its own independent generated
+  types. Two `<db>` blocks that both list `users` in `tables=` produce two independent
   `Users` types with nominal distinctness. They are not the same type even if the underlying
   schemas are identical.
 
@@ -8027,8 +8027,8 @@ view selection):**
 **Added:** 2026-06-08 (S175) — ratifies the typed-SQL-row Tranche 2 ("Shape C") design.
 
 §14.8.1 establishes that generated table types are **nominal**, and §14.8.4/§14.8.7 wall
-them inside the `< db>` block ("do not exist in source text" / "SHALL NOT be accessible
-outside the `< db>` block" / "MAY NOT redeclare"). Those walls remain the default. This
+them inside the `<db>` block ("do not exist in source text" / "SHALL NOT be accessible
+outside the `<db>` block" / "MAY NOT redeclare"). Those walls remain the default. This
 subsection carves out a **single, bounded exception**: a consumer component MAY declare a
 plain `:struct` (§14.3) as a **prop contract**, and a SQL **projection row** (the Tranche-1
 typed `?{ SELECT ... }` row of §14.8.7) **structurally width-subtypes** into that contract.
@@ -8086,7 +8086,7 @@ whose SELECT omits, say, `rate_dollars` would fire `E-SQL-ROW-CONTRACT-MISMATCH`
 `load.bogus` is `E-TYPE-004`.
 
 **Interaction with the nominal wall.** This exception does NOT make the generated table types
-themselves visible outside the `< db>` block, nor does it let developer code redeclare a
+themselves visible outside the `<db>` block, nor does it let developer code redeclare a
 generated type — §14.8.4/§14.8.7 are unchanged for the *generated* types. It governs only the
 direction *projection-row → developer-declared `:struct`*. The `:struct` contract is an
 ordinary user type (§14.3) that crosses files like any other (import/export). See §14.3 and
@@ -8955,7 +8955,7 @@ Communication IS state, not events. The component does not call a function or di
 event; it mutates a shared state instance. The parent's reactive rendering observes field
 changes automatically.
 
-**State instance mutability:** State type definitions (`< typename>` declarations) are
+**State instance mutability:** State type definitions (`<typename>` declarations) are
 immutable — the shape of the type is fixed at compile time. State instances (the runtime
 objects that carry field values) are mutable. Field writes on a state instance trigger
 reactive updates in all observers, exactly as writes to `@variables` do. This distinction is
@@ -9018,7 +9018,7 @@ state-ref        ::= '<#' identifier '>'
 
 ```scrml
 // Shared type declaration (may be in a shared module)
-< formResult>
+<formResult>
     name: string = ""
     email: string = ""
     submitted: boolean = false
@@ -9060,7 +9060,7 @@ The parent observes field changes through the reactive dependency system.
 **Worked example — valid (filter panel with multi-field communication):**
 
 ```scrml
-< filterState>
+<filterState>
     query: string = ""
     sortBy: string = "date"
     showArchived: boolean = false
@@ -9090,7 +9090,7 @@ export const FilterPanel = <div class="filters" props={ filters: filterState }>
 **Worked example — invalid (wrong state type at call site):**
 
 ```scrml
-< formResult>
+<formResult>
     name: string = ""
     submitted: boolean = false
 </>
@@ -9099,7 +9099,7 @@ export const ContactForm = <form props={ result: formResult }>
     // ...
 </>
 
-< otherState>
+<otherState>
     value: number = 0
 </>
 
@@ -9586,7 +9586,7 @@ RegistryEntry = {
 
 The registry composes four sources, in lookup precedence:
 
-1. **Same-file declarations** — `${ const Foo = <markup/> }` and `< state type Foo>` in the current file.
+1. **Same-file declarations** — `${ const Foo = <markup/> }` and `<state type Foo>` in the current file.
 2. **Imported names** — names brought in via `import { Foo } from "..."`. Resolved via the MOD `exportRegistry`.
 3. **Built-in scrml lifecycle types** — `channel`, `engine` (canonical, P1; `machine` is the deprecated alias), `timer`, `poll`, `db`, `schema`, `request`, `errorBoundary`, plus other §6.7 lifecycle types.
 4. **Built-in HTML elements** — the registry from `compiler/src/html-elements.js` (§24).
@@ -9606,7 +9606,7 @@ NR resolves an opener `<name>` in this order:
 Casing is irrelevant to resolution outcome. Convention is:
 - HTML elements and built-in lifecycle types: lowercase (`<div>`, `<channel>`, `<engine>`).
 - Components: PascalCase (`<UserCard>`, `<Greeting>`).
-- User state-types: PascalCase recommended (`< Order>`, `< CartState>`); lowercase permitted but emits W-CASE-001 if it shadows a built-in HTML element.
+- User state-types: PascalCase recommended (`<Order>`, `<CartState>`); lowercase permitted but emits W-CASE-001 if it shadows a built-in HTML element.
 
 #### 15.15.4 W-CASE-001 — Lowercase User State-Type Shadowing HTML Element
 
@@ -10193,7 +10193,7 @@ equivalent `if`/`else if`/`else` logic. The TS pass performs type-checking over
 
 ```scrml
 <program>
-  < session { loggedIn: bool }
+  <session { loggedIn: bool }
 
   <div class="auth-area">
     <span if=@loggedIn>Welcome back</>
@@ -10224,7 +10224,7 @@ An `else` block must immediately follow an element with `if=` or `else-if=`.
 
 ```scrml
 <program>
-  < wizard { step: int }
+  <wizard { step: int }
 
   <div class="wizard">
     <StepOne   if=@step.eq(1) />
@@ -10244,7 +10244,7 @@ Components and HTML elements may be mixed freely in a chain.
 
 ```scrml
 <program>
-  < fetch { status: Status }
+  <fetch { status: Status }
 
   <div class="result-area">
     <div class="error"   if=@status.is(Error)>${@status.message}</>
@@ -12526,7 +12526,7 @@ Compiles. The function handles only the variants it cares about.
 
 ### 19.1 Overview
 
-scrml error handling is based on **Renderable Enum Variants**. Error types are enum types (§14.4). Error variants are enum variants. The `fail` keyword produces an error variant value. The `?` operator propagates errors. The `!` function signature modifier declares a function as failable. The `< errorBoundary>` state type catches errors in markup context.
+scrml error handling is based on **Renderable Enum Variants**. Error types are enum types (§14.4). Error variants are enum variants. The `fail` keyword produces an error variant value. The `?` operator propagates errors. The `!` function signature modifier declares a function as failable. The `<errorBoundary>` state type catches errors in markup context.
 
 There is NO try/catch. There are NO exceptions. Errors are values that flow through the type system and are checked at compile time.
 
@@ -12534,7 +12534,7 @@ There is NO try/catch. There are NO exceptions. Errors are values that flow thro
 
 #### 19.2.1 Syntax
 
-An enum variant MAY carry a `renders` clause. The `renders` clause specifies markup that SHALL be used to display the variant — either when it appears in a markup context inside an `< errorBoundary>` (caught from a live `!`-call, §19.6.3), OR when a `<render of=X/>` render-expression (§19.15) fires the held value's display contract from any markup position. The `renders` clause is the variant's **display contract**: narrower in meaning (one declared per-variant display) but wider in reach (fireable wherever the value is held, not only on a thrown path). **S196 amendment (render-expression, RATIFIED S195):** prior to S196 the clause fired ONLY inside an `< errorBoundary>`; `<render of=X/>` (§19.15) makes the same contract fireable from a HELD value (the canonical errors-as-states `.Failed(err)` lift), reusing the §19.6.6 exhaustiveness machinery without widening `< errorBoundary>` and without generalizing `renders` to non-error enums.
+An enum variant MAY carry a `renders` clause. The `renders` clause specifies markup that SHALL be used to display the variant — either when it appears in a markup context inside an `<errorBoundary>` (caught from a live `!`-call, §19.6.3), OR when a `<render of=X/>` render-expression (§19.15) fires the held value's display contract from any markup position. The `renders` clause is the variant's **display contract**: narrower in meaning (one declared per-variant display) but wider in reach (fireable wherever the value is held, not only on a thrown path). **S196 amendment (render-expression, RATIFIED S195):** prior to S196 the clause fired ONLY inside an `<errorBoundary>`; `<render of=X/>` (§19.15) makes the same contract fireable from a HELD value (the canonical errors-as-states `.Failed(err)` lift), reusing the §19.6.6 exhaustiveness machinery without widening `<errorBoundary>` and without generalizing `renders` to non-error enums.
 
 **Formal grammar (extends §14.4):**
 
@@ -12652,7 +12652,7 @@ A call to a `!` function SHALL NOT be ignored. The caller MUST do one of the fol
 1. **Match** the result: `match riskyFunction() { ::Ok(val) -> ... ::ErrorVariant -> ... }`
 2. **Propagate** with `?`: `let x = riskyFunction()?`
 3. **Catch** with `!{}` inline handler: `let x = riskyFunction() !{ ::ErrorVariant -> fallbackValue }`
-4. **Contain** inside `< errorBoundary>`: in markup context, an `< errorBoundary>` catches the error
+4. **Contain** inside `<errorBoundary>`: in markup context, an `<errorBoundary>` catches the error
 
 Failing to handle the result of a `!` function call in any of these ways SHALL be a compile error: **E-ERROR-002** -- `Result of failable function '{name}' is not handled. Either match the result, propagate with '?', catch with '!{}', or wrap in '<errorBoundary>'.`
 
@@ -12661,7 +12661,7 @@ Failing to handle the result of a `!` function call in any of these ways SHALL b
 - The `!` modifier SHALL appear after the parameter list and before the optional error-type annotation in a function declaration.
 - The error type annotation after `!` MAY be declared with the arrow form (`! -> ErrorType`) or the bare form (`! ErrorType`) — the two forms are EQUIVALENT; both declare the function's error enum type explicitly (S137 amendment).
 - A function with `!` SHALL accept `fail` statements in its body. A function without `!` SHALL NOT accept `fail` statements (E-ERROR-001).
-- The caller of a `!` function SHALL handle the result via match, `?`, `!{}`, or `< errorBoundary>`. An unhandled `!` function call SHALL be a compile error (E-ERROR-002).
+- The caller of a `!` function SHALL handle the result via match, `?`, `!{}`, or `<errorBoundary>`. An unhandled `!` function call SHALL be a compile error (E-ERROR-002).
 - The `!` modifier SHALL be part of the function's type signature. It is visible to the type system and participates in type checking.
 - `server` and `!` modifiers MAY coexist: `server function loadUser(id)! -> UserError { ... }` (arrow form) or `server function loadUser(id)! UserError { ... }` (bare form).
 - `pure` (§33) and `!` modifiers MAY coexist: `pure function validate(x)! -> ValidationError { ... }`. A `pure` failable function SHALL NOT have side effects but MAY produce error values.
@@ -12722,16 +12722,16 @@ This ensures that `?` never silently drops error information.
 
 ---
 
-### 19.6 The `< errorBoundary>` State Type
+### 19.6 The `<errorBoundary>` State Type
 
 #### 19.6.1 Overview
 
-`< errorBoundary>` is a **pre-defined state type** (§11 → §6, §52) that catches errors from `!` function calls within its markup content. It is the markup-context counterpart to `match` in logic context.
+`<errorBoundary>` is a **pre-defined state type** (§11 → §6, §52) that catches errors from `!` function calls within its markup content. It is the markup-context counterpart to `match` in logic context.
 
 #### 19.6.2 Syntax
 
 ```scrml
-< errorBoundary fallback={<div>Something went wrong/}>
+<errorBoundary fallback={<div>Something went wrong/}>
     // content that may contain failable function calls
     ${loadUser(42)}
     ${processPayment(100)}
@@ -12746,20 +12746,20 @@ This ensures that `?` never silently drops error information.
 
 #### 19.6.3 Semantics
 
-When a `!` function call inside an `< errorBoundary>` produces an error variant:
+When a `!` function call inside an `<errorBoundary>` produces an error variant:
 
 1. If the error variant has a `renders` clause (§19.2), the `renders` clause markup is displayed in place of the function call's expected output.
-2. If the error variant has NO `renders` clause and the `< errorBoundary>` has a `fallback` attribute, the `fallback` markup is displayed.
-3. If the error variant has NO `renders` clause and the `< errorBoundary>` has NO `fallback` attribute, this SHALL be a compile error: **E-ERROR-005** -- `Error variant '{EnumType}::{VariantName}' may occur inside '<errorBoundary>' at {location} but has no 'renders' clause and the boundary has no 'fallback' attribute. Either add a 'renders' clause to the variant or add a 'fallback' attribute to the boundary.`
+2. If the error variant has NO `renders` clause and the `<errorBoundary>` has a `fallback` attribute, the `fallback` markup is displayed.
+3. If the error variant has NO `renders` clause and the `<errorBoundary>` has NO `fallback` attribute, this SHALL be a compile error: **E-ERROR-005** -- `Error variant '{EnumType}::{VariantName}' may occur inside '<errorBoundary>' at {location} but has no 'renders' clause and the boundary has no 'fallback' attribute. Either add a 'renders' clause to the variant or add a 'fallback' attribute to the boundary.`
 
 #### 19.6.4 Nesting
 
-`< errorBoundary>` elements are nestable. An inner boundary catches errors before an outer boundary.
+`<errorBoundary>` elements are nestable. An inner boundary catches errors before an outer boundary.
 
 ```scrml
-< errorBoundary fallback={<div>Page error/}>
+<errorBoundary fallback={<div>Page error/}>
     <header>${loadNav()}</>
-    < errorBoundary fallback={<div>Content error/}>
+    <errorBoundary fallback={<div>Content error/}>
         ${loadContent()}
     </>
     <footer>${loadFooter()}</>
@@ -12772,7 +12772,7 @@ In this example:
 
 #### 19.6.5 Interaction with `renders` Clauses
 
-When an error variant with a `renders` clause is caught by an `< errorBoundary>`, the `renders` clause takes precedence over the `fallback` attribute. The `fallback` is only used for variants that lack a `renders` clause.
+When an error variant with a `renders` clause is caught by an `<errorBoundary>`, the `renders` clause takes precedence over the `fallback` attribute. The `fallback` is only used for variants that lack a `renders` clause.
 
 **Priority order:**
 
@@ -12782,31 +12782,31 @@ When an error variant with a `renders` clause is caught by an `< errorBoundary>`
 
 #### 19.6.6 Normative Statements
 
-- `< errorBoundary>` SHALL be a pre-defined state type recognized by the compiler. It SHALL NOT be user-definable; the compiler provides it.
-- `< errorBoundary>` SHALL catch error variants produced by any `!` function call in its direct or nested markup content.
-- Within an `< errorBoundary>`, calling a `!` function without explicit match/propagation SHALL NOT trigger E-ERROR-002. The boundary satisfies the handling requirement.
-- Nested `< errorBoundary>` elements SHALL follow inner-catches-first semantics. An error caught by an inner boundary SHALL NOT propagate to an outer boundary.
-- The compiler SHALL verify, at compile time, that every error variant reachable inside an `< errorBoundary>` either has a `renders` clause or is covered by the boundary's `fallback` attribute. Failure to satisfy this SHALL be E-ERROR-005.
+- `<errorBoundary>` SHALL be a pre-defined state type recognized by the compiler. It SHALL NOT be user-definable; the compiler provides it.
+- `<errorBoundary>` SHALL catch error variants produced by any `!` function call in its direct or nested markup content.
+- Within an `<errorBoundary>`, calling a `!` function without explicit match/propagation SHALL NOT trigger E-ERROR-002. The boundary satisfies the handling requirement.
+- Nested `<errorBoundary>` elements SHALL follow inner-catches-first semantics. An error caught by an inner boundary SHALL NOT propagate to an outer boundary.
+- The compiler SHALL verify, at compile time, that every error variant reachable inside an `<errorBoundary>` either has a `renders` clause or is covered by the boundary's `fallback` attribute. Failure to satisfy this SHALL be E-ERROR-005.
 
 #### 19.6.7 Multi-Batch CPS Granularity
 
 **Added:** 2026-05-08, A9 Ext 4 (S72 body-split integration design dive Q3 verdict).
 
-When a server function is split across the client/server boundary (CPS — see §19.9.5), and the CPS implementation produces multiple server batches in execution order, the granularity at which `< errorBoundary>` catches a failure is **per-batch**, not per-function:
+When a server function is split across the client/server boundary (CPS — see §19.9.5), and the CPS implementation produces multiple server batches in execution order, the granularity at which `<errorBoundary>` catches a failure is **per-batch**, not per-function:
 
 - Batch 1 commits stand if batch 1 succeeded; batch 2's failure does NOT roll batch 1 back. (No 2PC / saga is performed; per S72 body-split soundness verdict, that path is deliberately out-of-scope.)
-- The `< errorBoundary>` catches batch K's failure as a tagged scrml-error variant. The boundary's `fallback` markup (or a variant's `renders` clause) is displayed in place of the function's expected output.
+- The `<errorBoundary>` catches batch K's failure as a tagged scrml-error variant. The boundary's `fallback` markup (or a variant's `renders` clause) is displayed in place of the function's expected output.
 - Recovery from a non-tail batch failure is **idempotency-key replay** of batch K (A9 Ext 5; future scope, per S72 body-split integration ratification).
 
-The pathological multi-batch case — batch N depends on batch K's durable write across the client/server boundary AND K is non-tail — is **rejected at compile time** by the S3 reorder verdict (`E-CPS-MULTIBATCH-REORDER`, implemented in §19.9.9 — A9 Ext 1, S114). For all admissible cases, the existing §19 mechanisms (`?` propagation, `!{}` handler, `< errorBoundary>` markup) catch the failure surface; no new mechanism is required.
+The pathological multi-batch case — batch N depends on batch K's durable write across the client/server boundary AND K is non-tail — is **rejected at compile time** by the S3 reorder verdict (`E-CPS-MULTIBATCH-REORDER`, implemented in §19.9.9 — A9 Ext 1, S114). For all admissible cases, the existing §19 mechanisms (`?` propagation, `!{}` handler, `<errorBoundary>` markup) catch the failure surface; no new mechanism is required.
 
-A worked example illustrating "batch 1 commits stand on batch 2 failure; the developer's `< errorBoundary>` catches the error variant" is provided in §19.9.5.
+A worked example illustrating "batch 1 commits stand on batch 2 failure; the developer's `<errorBoundary>` catches the error variant" is provided in §19.9.5.
 
 #### 19.6.8 Runtime Backstop for Non-`!` Errors (C-Hybrid)
 
 **Added:** 2026-05-29 (S142 errorBoundary build; C-hybrid catch-scope ratification).
 
-The typed `!`-error model of §19.6.3 is the **PRIMARY** documented behavior of `< errorBoundary>`. The static-exhaustiveness guarantee of §19.6.6 (E-ERROR-005) stands UNCHANGED: every error variant reachable inside a boundary SHALL be covered by a `renders` clause or the boundary's `fallback` attribute, verified at compile time.
+The typed `!`-error model of §19.6.3 is the **PRIMARY** documented behavior of `<errorBoundary>`. The static-exhaustiveness guarantee of §19.6.6 (E-ERROR-005) stands UNCHANGED: every error variant reachable inside a boundary SHALL be covered by a `renders` clause or the boundary's `fallback` attribute, verified at compile time.
 
 In ADDITION to the typed path, the compiler SHALL emit the boundary's subtree render — and the execution of any reactive effects that subtree registers — inside a host-JS try/catch **backstop**. The backstop provides defense-in-depth (Pillar 6 — bullet-proof apps) so that an unexpected host or runtime error that the typed `!`-path does NOT model degrades gracefully to the boundary's `fallback`, rather than corrupting the surrounding page.
 
@@ -12814,7 +12814,7 @@ In ADDITION to the typed path, the compiler SHALL emit the boundary's subtree re
 
 **B2 — Backstop catch.** A non-`!` error thrown during the subtree's render or effect execution SHALL be caught by the nearest enclosing boundary's backstop and SHALL cause that boundary's `fallback` markup to be displayed in place of the subtree's output. Content rendered by sibling subtrees OUTSIDE the boundary SHALL be unaffected (§19.6.4 — the catch is scoped to the boundary subtree).
 
-**B3 — No `fallback`, propagate.** If a non-`!` error is caught by the backstop but the catching boundary has NO `fallback` attribute, the error SHALL propagate to the next enclosing `< errorBoundary>` (§19.6.4 nesting — inner-catches-first). If there is no enclosing boundary, the error SHALL propagate to the host. The backstop SHALL NOT silently discard an error it cannot display.
+**B3 — No `fallback`, propagate.** If a non-`!` error is caught by the backstop but the catching boundary has NO `fallback` attribute, the error SHALL propagate to the next enclosing `<errorBoundary>` (§19.6.4 nesting — inner-catches-first). If there is no enclosing boundary, the error SHALL propagate to the host. The backstop SHALL NOT silently discard an error it cannot display.
 
 **B4 — Compiler-emitted, not source try/catch.** The backstop is COMPILER-EMITTED host-JS. It is NOT a scrml-source `try`/`catch`. The no-`try`/`catch` standing rule (§19.9.8) is unaffected: `try`/`catch`/`throw` remain absent from scrml source. The backstop is invisible at the source level — it is a runtime sibling of the compile-time emitted-JS parse gate (§2.2.1) and the bootstrap guards (e.g. the localStorage availability guard), all of which are compiler-provided host-JS the author never writes.
 
@@ -12847,14 +12847,14 @@ match processPayment(100, 42) {
 
 Missing an error variant SHALL trigger E-TYPE-020 (non-exhaustive match over enum type).
 
-#### 19.7.2 Markup Context with `< errorBoundary>`
+#### 19.7.2 Markup Context with `<errorBoundary>`
 
-Inside an `< errorBoundary>`, exhaustive matching is NOT required. The boundary handles error variants via `renders` clauses or `fallback`. The developer MAY still use explicit `match` inside a boundary for finer control.
+Inside an `<errorBoundary>`, exhaustive matching is NOT required. The boundary handles error variants via `renders` clauses or `fallback`. The developer MAY still use explicit `match` inside a boundary for finer control.
 
 #### 19.7.3 Normative Statements
 
 - In logic context, matching a `!` function result SHALL require exhaustive coverage of all variants (success and error). Missing variants SHALL trigger E-TYPE-020.
-- In markup context inside an `< errorBoundary>`, the boundary satisfies the error handling requirement. Exhaustive matching of error variants is NOT required.
+- In markup context inside an `<errorBoundary>`, the boundary satisfies the error handling requirement. Exhaustive matching of error variants is NOT required.
 - The `::Ok` variant SHALL be the implicit wrapper for the success value of a `!` function. The developer SHALL match `::Ok(value)` to access the success case in logic context.
 - A `_` wildcard arm SHALL satisfy exhaustiveness for remaining unmatched variants, per existing §18.6 rules.
 
@@ -12921,7 +12921,7 @@ When a server `!` function fails:
 1. The server serializes the error variant as a tagged JSON object: `{ __variant: "VariantName", __data: { ... } }`.
 2. The HTTP response carries an appropriate status code (see §19.9.2).
 3. The client CPS continuation deserializes the tagged object back into the error enum variant.
-4. The client code handles the error via match, `?`, `!{}`, or `< errorBoundary>`.
+4. The client code handles the error via match, `?`, `!{}`, or `<errorBoundary>`.
 
 #### 19.9.2 HTTP Status Code Mapping
 
@@ -13016,11 +13016,11 @@ function loadProfile(id: number) {
 **Caller-context propagation (D2).** A function `F` calling a CPS-split function `G` from within `F`'s body satisfies the §19.4 handling requirement automatically when:
 
 1. `F` is itself `!`-typed (caller propagates the failure structurally), OR
-2. `F`'s call to `G` occurs inside a `< errorBoundary>` markup region (the boundary catches the failure).
+2. `F`'s call to `G` occurs inside a `<errorBoundary>` markup region (the boundary catches the failure).
 
 If neither condition holds, the compiler emits **W-CPS-NEEDS-FAILABLE** (warning, deprecation cycle stage 1, v0.next) at the call site. The warning is informational; existing code compiles + runs unchanged. In **v0.next+1** (= v0.3.0), the warning is promoted to **E-CPS-NEEDS-FAILABLE** (error). Per S72 user-direction (`user-voice-scrml.md` 2026-05-08), the migration codemod is deferred — the two-stage cycle is sufficient given current adopter state.
 
-**Worked example — multi-batch CPS with `< errorBoundary>`.**
+**Worked example — multi-batch CPS with `<errorBoundary>`.**
 
 ```scrml
 // Function with two independent batches.
@@ -13028,7 +13028,7 @@ If neither condition holds, the compiler emits **W-CPS-NEEDS-FAILABLE** (warning
 // Batch 2 (server): email send (independent of log write).
 //
 // Per §19.6.7, batch 1's commit is durable; if batch 2 fails, the developer's
-// < errorBoundary> catches the error variant; the log entry from batch 1 is
+// <errorBoundary> catches the error variant; the log entry from batch 1 is
 // NOT rolled back. (No 2PC / saga; per S72 body-split soundness verdict, that
 // path is out-of-scope.)
 function notifyOrder(orderId: number) {
@@ -13045,19 +13045,19 @@ function notifyOrder(orderId: number) {
     scrml:email.send(@msg)
 }
 
-// Caller wraps in < errorBoundary>. On batch 2 failure, the boundary catches
+// Caller wraps in <errorBoundary>. On batch 2 failure, the boundary catches
 // the tagged scrml-error variant; the log entry from batch 1 is durable
 // (already committed); the developer recovers via retry (Ext 5 future scope).
-< errorBoundary fallback={<div>Notification failed; logged but email pending</>}>
+<errorBoundary fallback={<div>Notification failed; logged but email pending</>}>
     ${notifyOrder(@currentOrderId)}
 </>
 ```
 
 **Three migration paths for adopters today (cycle 1, v0.next).** When a CPS-eligible call site fires W-CPS-NEEDS-FAILABLE, the developer chooses one of:
 
-1. **`< errorBoundary>` markup wrapper** (markup-context callers; canonical pattern):
+1. **`<errorBoundary>` markup wrapper** (markup-context callers; canonical pattern):
    ```scrml
-   < errorBoundary fallback={<div>Failed to load profile</>}>
+   <errorBoundary fallback={<div>Failed to load profile</>}>
        ${loadProfile(@currentUserId)}
    </>
    ```
@@ -13271,7 +13271,7 @@ Per the body-split soundness predicates **S1-S5** (body-split soundness design d
 - **S4 (failure-mode preservation)** — each emitted stub is `!`-wrapped (§19.9.5); per-batch and outer `try`/`catch` route every failure through the existing §19 error mechanisms; an earlier batch's commit stands on a later batch's failure (§19.6.7).
 - **S5 (replay safety)** — strengthened: per-batch idempotency-key classification (§19.9.9.3) is strictly finer-grain than the §19.9.6 per-function classification, lowering cost without weakening replay safety.
 
-**Cross-references.** §8.9 (per-handler transactional envelope — each batch is one); §12 / §19.9.3 (CPS eligibility / preservation — the tier classification source); §19.6.7 (multi-batch CPS granularity — `< errorBoundary>` catches per-batch; ratified here); §19.9.5 (Ext 4 auto-`!`-wrap — per-stub composition); §19.9.6 (Ext 5 static monotonicity + idempotency-key replay — lifted per-batch by §19.9.9.3); §19.9.7 (`.idempotent()` modifier — applies per-batch); §19.9.8 (no `async`/`await` — Ext 1 preserves the CPS wrapper envelope); §22 (`^{}` meta — orthogonal; Ext 1 does not enter meta bodies); §31 (module-grain dependency graph — the body-DG is a statement-grain sibling, not a replacement); §51.0.G (`<machine>` `.advance()` — the machine-crossing reject leg); §34 catalog (`E-CPS-MULTIBATCH-REORDER`, `E-CPS-MULTIBATCH-MACHINE-CROSSING`).
+**Cross-references.** §8.9 (per-handler transactional envelope — each batch is one); §12 / §19.9.3 (CPS eligibility / preservation — the tier classification source); §19.6.7 (multi-batch CPS granularity — `<errorBoundary>` catches per-batch; ratified here); §19.9.5 (Ext 4 auto-`!`-wrap — per-stub composition); §19.9.6 (Ext 5 static monotonicity + idempotency-key replay — lifted per-batch by §19.9.9.3); §19.9.7 (`.idempotent()` modifier — applies per-batch); §19.9.8 (no `async`/`await` — Ext 1 preserves the CPS wrapper envelope); §22 (`^{}` meta — orthogonal; Ext 1 does not enter meta bodies); §31 (module-grain dependency graph — the body-DG is a statement-grain sibling, not a replacement); §51.0.G (`<machine>` `.advance()` — the machine-crossing reject leg); §34 catalog (`E-CPS-MULTIBATCH-REORDER`, `E-CPS-MULTIBATCH-MACHINE-CROSSING`).
 
 ---
 
@@ -13391,7 +13391,7 @@ ${
     }
 }
 
-< errorBoundary fallback={<div>Payment failed/}>
+<errorBoundary fallback={<div>Payment failed/}>
     <div if=@paymentResult>
         ${match @paymentResult {
             ::Ok(receipt) :> lift <div>Paid: ${receipt.id}</>
@@ -13405,7 +13405,7 @@ ${
 
 - A reactive variable MAY hold an error variant value. The type of the reactive variable SHALL be inferred as the union of success and error types if assigned from a `!` function result.
 - Reactive variables holding error values SHALL trigger reactive updates when the error value changes, following standard reactivity rules (§6).
-- The `< errorBoundary>` SHALL catch errors from reactive variables that hold error variant values when those variables are interpolated in markup context.
+- The `<errorBoundary>` SHALL catch errors from reactive variables that hold error variant values when those variables are interpolated in markup context.
 
 ---
 
@@ -13648,7 +13648,7 @@ ${
 ```scrml
 <div class="payment-form">
     <h2>Process Payment</>
-    < errorBoundary>
+    <errorBoundary>
         <receipt> = not
         ${
             function handleSubmit() {
@@ -13668,7 +13668,7 @@ ${
 </>
 ```
 
-In this example, if `processPayment` fails with any `PaymentError` variant, the `< errorBoundary>` catches it and renders the variant's `renders` clause automatically. No explicit match of error variants is needed in the markup.
+In this example, if `processPayment` fails with any `PaymentError` variant, the `<errorBoundary>` catches it and renders the variant's `renders` clause automatically. No explicit match of error variants is needed in the markup.
 
 #### 19.14.2 Authentication Flow with Validation Errors
 
@@ -13702,7 +13702,7 @@ ${
 }
 
 <div class="register-form">
-    < errorBoundary>
+    <errorBoundary>
         <form onsubmit=handleRegister()>
             <label>Email <input type="email" bind:value=@email></>
             <label>Password <input type="password" bind:value=@password></>
@@ -13782,27 +13782,27 @@ type AnalyticsError:enum = {
 
 <div class="dashboard">
     // Outer boundary catches page-level errors
-    < errorBoundary fallback={<div class="page-error">Dashboard unavailable/}>
+    <errorBoundary fallback={<div class="page-error">Dashboard unavailable/}>
         <header>
             ${loadDashboardHeader()}
         </>
 
         <div class="widgets">
             // Each widget has its own boundary — one widget failure does not bring down the page
-            < errorBoundary>
+            <errorBoundary>
                 <div class="widget revenue">
                     ${loadRevenueWidget()}
                 </>
             </>
 
-            < errorBoundary>
+            <errorBoundary>
                 <div class="widget users">
                     ${loadUsersWidget()}
                 </>
             </>
 
             // Analytics section has its own error type
-            < errorBoundary>
+            <errorBoundary>
                 <div class="widget analytics">
                     ${loadAnalytics(@selectedPeriod)}
                 </>
@@ -13815,7 +13815,7 @@ type AnalyticsError:enum = {
 ```
 
 In this example:
-- Each widget is wrapped in its own `< errorBoundary>`. If `loadRevenueWidget()` fails, only the revenue widget shows an error. The users widget and analytics widget remain functional.
+- Each widget is wrapped in its own `<errorBoundary>`. If `loadRevenueWidget()` fails, only the revenue widget shows an error. The users widget and analytics widget remain functional.
 - The outer boundary catches errors from `loadDashboardHeader()` and `loadDashboardFooter()`. If either fails, the entire page falls back to "Dashboard unavailable."
 - Error variants with `renders` clauses display context-specific error UIs (retry buttons, explanatory text) without any explicit match handling in the template.
 
@@ -13829,7 +13829,7 @@ In this example:
 | `?` operator | Propagates error to caller; requires `!` function |
 | `!` signature | Declares function as failable; error type in signature |
 | `renders` clause | Optional markup on enum variants; auto-displays in boundary |
-| `< errorBoundary>` | Catches errors in markup; uses `renders` or `fallback` |
+| `<errorBoundary>` | Catches errors in markup; uses `renders` or `fallback` |
 | `match` (§18) | Exhaustive over success + error variants in logic context |
 | `?{}` SQL (§8) | Produces `SqlError` in `!` functions; `not`/empty outside |
 | `@reactive` (§6) | Reactive variables can hold error variants; trigger updates |
@@ -13838,7 +13838,7 @@ In this example:
 | `transaction` | Auto-rollback on `fail`; syntactic sugar over BEGIN/COMMIT/ROLLBACK |
 | `pure` (§33) | `pure` and `!` coexist; pure functions can fail without side effects |
 | `lin` (§35) | `lin` variables inside `!` functions follow normal linear rules; `fail` is a scope exit that must consume `lin` variables |
-| `< state>` types (§11 → §6, §52) | `< errorBoundary>` is a pre-defined state type |
+| `<state>` types (§11 → §6, §52) | `<errorBoundary>` is a pre-defined state type |
 
 ## Appendix B: Superseded Spec Text
 
@@ -13854,7 +13854,7 @@ This section replaces the entirety of §19 (Error Handling) as it existed in the
 The following are explicitly out of scope for this version but noted for future work:
 
 1. **Error type composition** -- Combining multiple error types into a unified error type (e.g., `type AppError = PaymentError | AuthError | SqlError`). This requires union-of-enum support in the type system.
-2. **Error recovery / retry policies** -- Declarative retry logic on `< errorBoundary>` (e.g., `< errorBoundary retries=3 delay=1000>`).
+2. **Error recovery / retry policies** -- Declarative retry logic on `<errorBoundary>` (e.g., `<errorBoundary retries=3 delay=1000>`).
 3. **Error logging / telemetry hooks** -- Automatic error reporting to external services when errors are caught by boundaries.
 4. **Async error streams** -- Error handling for long-lived connections (WebSocket, SSE) where errors arrive asynchronously.
 
@@ -13914,7 +13914,7 @@ The `</>` form is specified in §4.4.2. The removal of bare `/` as a closer is a
 
 ### 19.15 The `<render of=X/>` Render-Expression (held-variant display)
 
-**Added 2026-06-15 (S196); RATIFIED S195** (held-error-display deep-dive + adversarial debate; design-insight "Held-error display — render-expression primitive (a/c)"). The render-expression closes the held-error-DISPLAY gap: a variant's `renders` clause (§19.2) fires automatically only when an `< errorBoundary>` catches a LIVE `!`-call (§19.6.3), but the canonical errors-as-states lift routes the failure into a HELD state cell (`@phase = .Failed(err)`), where no `renders` clause could fire. `<render of=X/>` fires a HELD value's per-variant `renders` markup from any markup position.
+**Added 2026-06-15 (S196); RATIFIED S195** (held-error-display deep-dive + adversarial debate; design-insight "Held-error display — render-expression primitive (a/c)"). The render-expression closes the held-error-DISPLAY gap: a variant's `renders` clause (§19.2) fires automatically only when an `<errorBoundary>` catches a LIVE `!`-call (§19.6.3), but the canonical errors-as-states lift routes the failure into a HELD state cell (`@phase = .Failed(err)`), where no `renders` clause could fire. `<render of=X/>` fires a HELD value's per-variant `renders` markup from any markup position.
 
 #### 19.15.1 Syntax
 
@@ -13940,7 +13940,7 @@ type Phase:enum = { Idle, Loading, Loaded(title: string), Failed(err: LoadError)
 
 #### 19.15.4 What it does NOT do (the design boundaries)
 
-- It does NOT touch `< errorBoundary>` (§19.6), which stays purely a CATCH primitive for live `!`-calls. The render-expression is a NEW, independent fire site — it never pretends a held value was thrown (the codegen sidesteps the `__scrml_error` envelope gate entirely).
+- It does NOT touch `<errorBoundary>` (§19.6), which stays purely a CATCH primitive for live `!`-calls. The render-expression is a NEW, independent fire site — it never pretends a held value was thrown (the codegen sidesteps the `__scrml_error` envelope gate entirely).
 - It does NOT generalize the `renders` grammar to non-error enums. `renders` remains the per-variant display contract of error-shaped enums (§19.2); `<render>` simply makes that contract fireable from a held value as well as a caught one. Generalizing `renders` to every enum (a universal view-clause) was the highest god-ification risk and is explicitly REJECTED.
 - It does NOT replace the value-match string helper (`fn errorMessage(e) -> string`) or the structural nested `<match for=ErrType on=@held>` — both remain FULLY VALID for STRING display and for finer per-variant control. `<render of=X/>` is for delegating to a declared per-variant `renders` MARKUP contract.
 
@@ -13948,7 +13948,7 @@ type Phase:enum = { Idle, Loading, Loaded(title: string), Failed(err: LoadError)
 
 The render-expression REUSES the existing per-variant `renders` machinery (the boundary's `allVariantRenderExprs` map + `emitBoundaryMarkupExpr`), substituting X's `.data` as the payload source instead of the boundary's `_eb_result.data`. It emits a render-anchor plus a per-variant `switch (X.variant)` that sets the anchor's `innerHTML` to the matching variant's `renders` markup, re-firing on X's reactive change. No new display infrastructure is introduced.
 
-**Cross-references.** §19.2 (the `renders` display contract this fires); §19.6 / §19.6.6 (`< errorBoundary>` + the E-ERROR-005 exhaustiveness fence the render-expression reuses); §18.0.1 (the `<match for=Type>` arm — the common render-expression locus); §13.5 (RemoteData — `Failed(Error)` is a held error variant the render-expression displays); §4.15 (`<render>` structural-element registration). Authority: design-insight "Held-error display — render-expression primitive (a/c)" (2026-06-15, RATIFIED), the error-handling holistic deep-dive, and the held-error-display debate.
+**Cross-references.** §19.2 (the `renders` display contract this fires); §19.6 / §19.6.6 (`<errorBoundary>` + the E-ERROR-005 exhaustiveness fence the render-expression reuses); §18.0.1 (the `<match for=Type>` arm — the common render-expression locus); §13.5 (RemoteData — `Failed(Error)` is a held error variant the render-expression displays); §4.15 (`<render>` structural-element registration). Authority: design-insight "Held-error display — render-expression primitive (a/c)" (2026-06-15, RATIFIED), the error-handling holistic deep-dive, and the held-error-display debate.
 
 ---
 
@@ -14028,7 +14028,7 @@ parsing numeric IDs (e.g., `let id = parseInt(route.params.id)`).
 
 ```scrml
 ${ let userId = route.params.id }
-< db src="db.sql" tables="users">
+<db src="db.sql" tables="users">
     ${ function loadProfile() {
         let user = ?{`SELECT name, avatar FROM users WHERE id = ${userId}`}.get()
         lift <div>
@@ -16025,7 +16025,7 @@ scrml compiles constructor-level `#{}` CSS to native CSS `@scope` blocks. Class 
 
 Source:
 ```scrml
-< card title(string)>
+<card title(string)>
     #{
         .card { padding: 16px; border: 1px solid #e5e7eb; }
     }
@@ -16792,7 +16792,7 @@ ${ pure fn double { return ~ * 2; } }
 A `pure` function SHALL NOT:
 
 1. Mutate any value outside its own scope (no assignment to outer variables, no property mutation on external objects).
-2. Perform database access in the body (no `?{ }` SQL contexts, no `< db>` operations inside the function body). The `server` modifier is orthogonal: it designates execution-site dispatch, not a body-level side effect. A `server pure function` (equivalently `server fn`, §48.10) is valid — the body must still satisfy every §33.3 constraint, and the network transport is a compiler-mediated call mechanism that is deterministic in value (same inputs → same outputs) from the developer's standpoint. Network failure surfaces through the orthogonal `!` error-return path (§19), not as non-determinism.
+2. Perform database access in the body (no `?{ }` SQL contexts, no `<db>` operations inside the function body). The `server` modifier is orthogonal: it designates execution-site dispatch, not a body-level side effect. A `server pure function` (equivalently `server fn`, §48.10) is valid — the body must still satisfy every §33.3 constraint, and the network transport is a compiler-mediated call mechanism that is deterministic in value (same inputs → same outputs) from the developer's standpoint. Network failure surfaces through the orthogonal `!` error-return path (§19), not as non-determinism.
 3. Mutate the DOM (no element creation, no attribute modification).
 4. Use `lift` (§10) — `lift` accumulates into a parent context, which is a side effect.
 5. Mutate `@` reactive variables (§6).
@@ -16821,7 +16821,7 @@ A `pure` function SHALL NOT:
 
 State-local transition bodies (§54.3) are implicitly pure. Because `fn` and `pure function` now enforce the same contract, the prior distinction between "fn-level" and "weaker pure function level" is retired. Transition bodies are subject to every constraint in §33.3 — authors MAY NOT call `Date.now()`, `Math.random()`, or other non-deterministic built-ins inside a transition body; these values SHALL be passed as parameters to the transition.
 
-Rationale: the unified purity contract preserves the `< machine>` subsystem's replay (§51.14), audit (§51.11), and auto-property-test (§51.13) guarantees, which all assume deterministic transitions.
+Rationale: the unified purity contract preserves the `<machine>` subsystem's replay (§51.14), audit (§51.11), and auto-property-test (§51.13) guarantees, which all assume deterministic transitions.
 
 ---
 
@@ -16928,11 +16928,11 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-PA-001 | §11.5 | `src=` file does not exist | Error |
 | E-PA-003 | §11.5 | Bun SQLite schema introspection failed | Error |
 | E-PA-004 | §11.5 | `tables=` references nonexistent table | Error |
-| E-PA-005 | §11.5 | `tables=` attribute absent from `< db>` block | Error |
-| E-PA-006 | §11.5 | `src=` attribute absent from `< db>` block | Error |
+| E-PA-005 | §11.5 | `tables=` attribute absent from `<db>` block | Error |
+| E-PA-006 | §11.5 | `src=` attribute absent from `<db>` block | Error |
 | E-PA-007 | §11.3 | `protect=` field name matches no table column | Error |
 | E-PROTECT-001 | §11.3.2 | Protected field accessed on client type | Error |
-| W-SQL-ROW-UNTYPED | §14.8.7 | A `?{ ... }` SQL query result (or one of its projection columns) could not be typed from the §14.8 generated table types and falls back to `asIs`. Info-level. Fires for the deferred v1 SQL surface long tail: a computed / expression / function-call projection column (that ONE field is `asIs`; the rest of the row stays typed), `SELECT *` over a JOIN, a CTE / `WITH`, a `UNION`, a subquery-in-FROM, or a query whose FROM table has no generated type in scope (no enclosing `< db>` block). NEVER fatal — the build always completes; the row's untyped fields are simply not statically checked. Single-table SELECTs and qualified-column JOINs with an explicit projection list (incl. `AS` aliases) DO get a typed projection row and fire no lint. (Catalog addition: typed-sql-row Tranche 1; emitted at `compiler/src/type-system.ts` `resolveSqlRowType`.) | Info |
+| W-SQL-ROW-UNTYPED | §14.8.7 | A `?{ ... }` SQL query result (or one of its projection columns) could not be typed from the §14.8 generated table types and falls back to `asIs`. Info-level. Fires for the deferred v1 SQL surface long tail: a computed / expression / function-call projection column (that ONE field is `asIs`; the rest of the row stays typed), `SELECT *` over a JOIN, a CTE / `WITH`, a `UNION`, a subquery-in-FROM, or a query whose FROM table has no generated type in scope (no enclosing `<db>` block). NEVER fatal — the build always completes; the row's untyped fields are simply not statically checked. Single-table SELECTs and qualified-column JOINs with an explicit projection list (incl. `AS` aliases) DO get a typed projection row and fire no lint. (Catalog addition: typed-sql-row Tranche 1; emitted at `compiler/src/type-system.ts` `resolveSqlRowType`.) | Info |
 | E-SQL-ROW-CONTRACT-MISMATCH | §14.8.8 | A SQL-projection-row value (a Tranche-1 typed `?{ SELECT ... }` row, or its per-item element) is passed to a component prop whose declared type is a developer-authored `:struct` contract, and the row does NOT structurally width-subtype into that contract: either (a) the contract requires a field the row does not project (`missing`), or (b) the row projects the field but its type is not assignable to the contract's declared type (`incompatible`). One diagnostic fires PER unsatisfied field, naming the field + the contract type. BOUNDED: this is the ONLY structural-subtyping path — it applies solely when the SOURCE is a SQL-projection row (`<sql-row>` provenance) and the TARGET is a declared `:struct` prop contract. General struct-to-struct assignment stays NOMINAL (§14.8.1) and never triggers this code. EXTRA columns in the row are allowed (width-subtyping). (Catalog addition: typed-sql-row Tranche 2 — Shape C, ratified S175; emitted at `compiler/src/type-system.ts` `checkPropContract` via `checkSqlRowWidthSubtype`; the call-site descriptor is recorded by `compiler/src/component-expander.ts` as `__propContractChecks`.) | Error |
 | E-PROTECT-002 | §11.3.3 | Code accessing protected field may run client-side | Error |
 | E-ROUTE-001 | §12.4 | Unresolvable callee or computed member access in route analysis | Warning |
@@ -16987,7 +16987,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-RENDER-NO-OF | §19.15.3 | `<render>` missing the required `of=` attribute (S196 — render-expression) | Error |
 | E-RENDER-NO-CLAUSE | §19.15.3 | `<render of=X>` — a reachable variant of X's held enum has no `renders` clause; reuses the §19.6.6 E-ERROR-005 per-variant exhaustiveness logic at the render-expression fire site (S196) | Error |
 | E-RENDER-NOT-ENUM | §19.15.3 | `<render of=X>` — X's static type resolves to a non-enum; the render-expression is enum-scoped (S196) | Error |
-| W-CPS-NEEDS-FAILABLE | §19.9.5 | Bare call to a CPS-eligible (implicitly-`!`) function from a non-`!`, non-`< errorBoundary>`-wrapped caller. Cycle 1 of the deprecation cycle (v0.next). Resolution: wrap call site in `< errorBoundary>`, mark caller `!`, or match on result. (Per A9 Ext 4, S72 body-split soundness verdict 2026-05-08.) | Warning |
+| W-CPS-NEEDS-FAILABLE | §19.9.5 | Bare call to a CPS-eligible (implicitly-`!`) function from a non-`!`, non-`<errorBoundary>`-wrapped caller. Cycle 1 of the deprecation cycle (v0.next). Resolution: wrap call site in `<errorBoundary>`, mark caller `!`, or match on result. (Per A9 Ext 4, S72 body-split soundness verdict 2026-05-08.) | Warning |
 | E-CPS-NEEDS-FAILABLE | §19.9.5 | Same condition as W-CPS-NEEDS-FAILABLE, promoted to error in cycle 2 (v0.next+1 = v0.3.0). Reserved; not yet emitted. | Error |
 | E-CPS-NONIDEM-NO-STORAGE | §19.9.6 | Non-monotone CPS batch in scope of `<program>` with `idempotency-store="none"` OR no resolvable backend (default-resolution falls through). Resolution: declare `idempotency-store=` on the closest-ancestor `<program>` (matching the `db=` driver), import `scrml:redis`, or annotate the function with `.idempotent()` if the batch is monotone-by-construction. (Per A9 Ext 5, S76 dispatch overlay 2026-05-09.) | Error |
 | E-CPS-IDEMPOTENCY-STORE-DRIVER-MISMATCH | §39.2.6 | `idempotency-store="postgres" \| "sqlite" \| "mysql"` does not match the closest-ancestor `<program db=>` driver. Resolution: change `idempotency-store=` to match `db=`, or use `"auto"` for compiler-default resolution. (Per A9 Ext 5, S76 dispatch overlay 2026-05-09.) | Error |
@@ -17056,7 +17056,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-CONTRACT-001 | §53.11 | Inline predicate violation at compile time (statically provable) | Error |
 | E-CONTRACT-001-RT | §53.11 | Inline predicate violation at runtime | Runtime |
 | E-CONTRACT-002 | §53.11 | Named shape not found in registry | Error |
-| E-CONTRACT-003 | §53.11 | Predicate references external state — use `< machine>` instead | Error |
+| E-CONTRACT-003 | §53.11 | Predicate references external state — use `<machine>` instead | Error |
 | E-CONTRACT-004-WARN | §53.11 | `bind:value` HTML attribute conflicts with predicate-generated attribute | Warning |
 | E-BPP-001 | §3.5 | Body pre-parser encountered unparseable logic block | Error |
 | E-BS-000 | §4 | Block splitter encountered malformed block structure | Error |
@@ -17390,18 +17390,18 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-PROG-003 | §40.4 | A reference inside a nested `<program>` reaches a parent-scope binding. Nested programs are fully isolated — no bindings, types, `use`, or `import` declarations propagate across the `<program>` boundary. Resolution: declare the binding inside the nested program, or import it via a `use foreign:` declaration. (Catalog addition S84 Wave 2 #5; full prose at §40 line 17980.) | Error |
 | E-PROG-004 | §40.4 | A cross-program function call is not `await`-ed. Cross-program calls return `Promise<T>`; the result must be awaited. (Catalog addition S84 Wave 2 #5; full prose at §40 line 18009.) | Error |
 | E-PROG-005 | §40.4 | Circular nested-program dependency detected. Program A nests/uses program B, B nests/uses A. (Catalog addition S84 Wave 2 #5; full prose at §40 line 18040.) | Error |
-| E-SCHEMA-001 | §39.12 | A `< schema>` block appears in a file whose `<program>` root has no `db=` attribute. The schema block declares table shapes for the program's database driver; without a driver the schema has no target. (Catalog addition S84 Wave 2 #5; full prose at §39.12 line 16683.) | Error |
-| E-SCHEMA-002 | §39.12 | A file contains more than one `< schema>` block. Each file declares at most one schema. (Catalog addition S84 Wave 2 #5; full prose at §39.12 line 16684.) | Error |
+| E-SCHEMA-001 | §39.12 | A `<schema>` block appears in a file whose `<program>` root has no `db=` attribute. The schema block declares table shapes for the program's database driver; without a driver the schema has no target. (Catalog addition S84 Wave 2 #5; full prose at §39.12 line 16683.) | Error |
+| E-SCHEMA-002 | §39.12 | A file contains more than one `<schema>` block. Each file declares at most one schema. (Catalog addition S84 Wave 2 #5; full prose at §39.12 line 16684.) | Error |
 | E-SCHEMA-003 | §39.12 | A `<schema>` block is nested inside any block other than the `<program>` root (logic context, component body, `<page>`, `<db>`, etc.). Schemas are immediate children of `<program>` only. (Catalog addition S84 Wave 2 #5; placement amended S130 phase-2 D per Q7 ratification; full prose at §39.12.) | Error |
-| E-SCHEMA-004 | §39.12 | A `< schema>` column declaration uses an unrecognized column type name. The legal type set is enumerated per-driver (SQLite, Postgres, MySQL). (Catalog addition S84 Wave 2 #5; full prose at §39.12 line 16977.) | Error |
-| E-SCHEMA-005 | §39.12 | A `default(...)` value in a `< schema>` column declaration is syntactically invalid SQL, OR a cross-field shared-core constraint references a column not in the same table. Validation is performed via SQLite `EXPLAIN` or statement preparation at compile time. (Catalog addition S84 Wave 2 #5; full prose at §39.12 lines 16734, 16803.) | Error |
-| E-SCHEMA-006 | §39.12 | A `references` clause in a `< schema>` column declaration targets a table or column that is not in scope. (Catalog addition S84 Wave 2 #5; full prose at §39.12 line 16979.) | Error |
-| E-SCHEMA-007 | §39.12 | A `rename from` annotation in a `< schema>` column declaration references a source column that does not exist in the database. (Catalog addition S84 Wave 2 #5; full prose at §39.12 line 16980.) | Error |
+| E-SCHEMA-004 | §39.12 | A `<schema>` column declaration uses an unrecognized column type name. The legal type set is enumerated per-driver (SQLite, Postgres, MySQL). (Catalog addition S84 Wave 2 #5; full prose at §39.12 line 16977.) | Error |
+| E-SCHEMA-005 | §39.12 | A `default(...)` value in a `<schema>` column declaration is syntactically invalid SQL, OR a cross-field shared-core constraint references a column not in the same table. Validation is performed via SQLite `EXPLAIN` or statement preparation at compile time. (Catalog addition S84 Wave 2 #5; full prose at §39.12 lines 16734, 16803.) | Error |
+| E-SCHEMA-006 | §39.12 | A `references` clause in a `<schema>` column declaration targets a table or column that is not in scope. (Catalog addition S84 Wave 2 #5; full prose at §39.12 line 16979.) | Error |
+| E-SCHEMA-007 | §39.12 | A `rename from` annotation in a `<schema>` column declaration references a source column that does not exist in the database. (Catalog addition S84 Wave 2 #5; full prose at §39.12 line 16980.) | Error |
 | E-SCHEMA-008 | §39.12 | Migration ambiguity: the desired-state schema removes one column and adds another with no `rename from` annotation. The compiler cannot decide whether to emit a rename or a drop+add. Resolution: add `rename from "oldname"` to the new column. (Catalog addition S84 Wave 2 #5; full prose at §39.12 line 16981.) | Error |
 | E-SCHEMA-009 | §39.12 | The database file referenced by `<program db=...>` exists on disk but is not a valid SQLite file. (Catalog addition S84 Wave 2 #5; full prose at §39.12 line 16982.) | Error |
-| W-SCHEMA-001 | §39.12 | A table declaration in `< schema>` has no primary key. Most tooling, ORMs, and migration assumptions presume a primary key; the absence is surfaced as a warning. (Catalog addition S84 Wave 2 #5; full prose at §39.12 line 16983.) | Warning |
+| W-SCHEMA-001 | §39.12 | A table declaration in `<schema>` has no primary key. Most tooling, ORMs, and migration assumptions presume a primary key; the absence is surfaced as a warning. (Catalog addition S84 Wave 2 #5; full prose at §39.12 line 16983.) | Warning |
 | W-SCHEMA-002 | §39.12 | The migration diff between the desired schema and the live database contains a destructive operation (`DROP TABLE` or `DROP COLUMN`). Destructive migrations are not auto-applied; the warning surfaces them for adopter review. (Catalog addition S84 Wave 2 #5; full prose at §39.12 line 16984.) | Warning |
-| W-SCHEMA-003 | §39.12 | The compiler generated TypeScript / scrml types from the desired-state `< schema>`, but the live database is currently out of sync with that schema. The emitted types describe the desired shape, not the current shape. Resolution: run `bun scrml migrate` to bring the live database in line. (Catalog addition S84 Wave 2 #5; full prose at §39.12 line 16985.) | Warning |
+| W-SCHEMA-003 | §39.12 | The compiler generated TypeScript / scrml types from the desired-state `<schema>`, but the live database is currently out of sync with that schema. The emitted types describe the desired shape, not the current shape. Resolution: run `bun scrml migrate` to bring the live database in line. (Catalog addition S84 Wave 2 #5; full prose at §39.12 line 16985.) | Warning |
 | E-CG-011 | §47.6 | The build configuration enables `output.debug: true` together with `output.mode: "production"`. Production-mode debug output leaks source-map / internal-name information; this combination is rejected as a hard error rather than a warning. (Catalog addition S84 Wave 2 #5; full prose at §47.6 lines 18462-18469.) | Error |
 | E-CG-012 | §47.6 | A user-authored scrml identifier (or vanilla JS identifier in a `_{}` foreign block) matches the compiler-reserved encoded-name pattern (`_` + kind char + 8 base36 chars). The `_` prefix is reserved for compiler-generated names. Resolution: rename the identifier. (Catalog addition S84 Wave 2 #5; full prose at §47.6 line 18301.) | Error |
 | E-CG-013 | §47.6 | The codegen type-encoding function received a `ResolvedType` with `kind: "unknown"`. PIPELINE.md §Stage 6 and §Stage 8 preconditions exclude this case; reaching the encoder with kind:"unknown" indicates an internal invariant violation. (Catalog addition S84 Wave 2 #5; full prose at §47.6 line 18323.) | Error |
@@ -17434,7 +17434,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-SQL-002 | §8.1.1 | A SQL template string (after `?N` placeholder substitution) is syntactically invalid SQL. Validated at compile time against the driver's parser. (Catalog addition S84 Wave 2 #5; full prose at §8.1.1 line 5597.) | Error |
 | E-SQL-003 | §8.1.1 | The `?{}` template body is a runtime expression (e.g., `?{`${sqlString}`}`) rather than a literal string template. SQL template bodies must remain literal at compile time so the compiler can validate and bind parameters; fragment reuse goes through the call graph, not runtime template assembly. (Catalog addition S84 Wave 2 #5; full prose at §8.1.1 lines 5619, 5643.) | Error |
 | E-SQL-007 | §44.4 | A `?{}` SQL block appears in a non-async context (e.g., inside a `fn` body, top-level synchronous markup attribute value). SQL queries return promises; they require an async-capable surrounding context. (Catalog addition S84 Wave 2 #5; full prose at §44.4; row at §8.7 line 5747 + §44.7 line 18131.) | Error |
-| E-SQL-009 | §44.7, §21.5.1 | An `export server function` containing `?{}` is declared in a file with no top-level `< db src=>` block (F-AUTH-002). The exported function would have no database connection in its compiled form. Resolution: add a `< db src=...>` block, or move the function to a file that has one. (Catalog addition S84 Wave 2 #5; full prose at §44.7 line 18133-18154, also §38.12.6 line 16649 for channel interaction.) | Error |
+| E-SQL-009 | §44.7, §21.5.1 | An `export server function` containing `?{}` is declared in a file with no top-level `<db src=>` block (F-AUTH-002). The exported function would have no database connection in its compiled form. Resolution: add a `<db src=...>` block, or move the function to a file that has one. (Catalog addition S84 Wave 2 #5; full prose at §44.7 line 18133-18154, also §38.12.6 line 16649 for channel interaction.) | Error |
 | E-CELL-OUT-OF-SCOPE | §51.0.Q | Reading a nested engine's auto-declared variable from outside the outer engine's composite state-child. The inner variable is reachable by canonical `@` access only while the outer is in the composite state-child. Deferred to A1c codegen for runtime-guard implementation; not yet fired in v0.next P1. (Catalog addition S84 Wave 2 #5; full prose at §51.0.Q line 21617.) | Error |
 | E-MW-003 | §40 | `resolve(request)` is called zero times or more than once in a `handle()` middleware body on a single execution path. `resolve` invokes the rest of the pipeline and MUST run exactly once per request. An early-return branch that does NOT call `resolve` is valid; the rule applies only to paths that DO call it. (Catalog addition S84 Wave 2 #5; full prose at §40 lines 17225, 17264, 17305.) | Error |
 | E-MW-004 | §40 | `handle()` middleware returns a value whose type is not `Response`. Middleware must produce a Bun `Response`; non-`Response` returns indicate a malformed pipeline. (Catalog addition S84 Wave 2 #5; full prose at §40 lines 17226, 17306.) | Error |
@@ -19379,22 +19379,22 @@ artifacts (per §38.12.6) and so does not trigger E-SQL-009.
 ---
 
 
-## 39. Database Schema Declaration and Migrations — `< schema>`
+## 39. Database Schema Declaration and Migrations — `<schema>`
 
-**Added:** 2026-04-01 — debate verdict: declarative `< schema>` block (49.5/60). Schema-as-code with compiler-generated migration diffs.
+**Added:** 2026-04-01 — debate verdict: declarative `<schema>` block (49.5/60). Schema-as-code with compiler-generated migration diffs.
 
 ### 39.1 Overview
 
-scrml provides a `< schema>` state block for declaring the desired database schema directly in source. The compiler reads the declared schema at compile time, reads the actual schema from the database at the path named in the enclosing `<program db="...">` attribute, computes the diff, and generates migration SQL. The `scrml migrate` CLI command applies that SQL to the live database.
+scrml provides a `<schema>` state block for declaring the desired database schema directly in source. The compiler reads the declared schema at compile time, reads the actual schema from the database at the path named in the enclosing `<program db="...">` attribute, computes the diff, and generates migration SQL. The `scrml migrate` CLI command applies that SQL to the live database.
 
 **Design principle:** The schema is code. The developer declares what the database SHOULD look like. The compiler figures out what it takes to get there. The developer never writes `ALTER TABLE` by hand.
 
-This section extends §11 (→ §6.12, §52; `< db>` state blocks) and §8 (`?{}` SQL contexts). A `< schema>` block is a sibling construct to `< db>`: both are state blocks that reference the database; `< db>` scopes SQL queries, `< schema>` declares structure.
+This section extends §11 (→ §6.12, §52; `<db>` state blocks) and §8 (`?{}` SQL contexts). A `<schema>` block is a sibling construct to `<db>`: both are state blocks that reference the database; `<db>` scopes SQL queries, `<schema>` declares structure.
 
 ### 39.2 Syntax
 
 ```
-schema-block ::= '< schema>' table-declaration* closer
+schema-block ::= '<schema>' table-declaration* closer
 table-declaration ::= table-name '{' column-declaration* '}'
 column-declaration ::= column-name ':' column-type column-constraint*
 column-type ::= 'text' | 'integer' | 'real' | 'blob' | 'boolean' | 'timestamp'
@@ -19410,7 +19410,7 @@ A `<schema>` block appears as an immediate child of the `<program>` root, alongs
 ```scrml
 <program db="./app.db">
 
-< schema>
+<schema>
     users {
         id:         integer primary key
         email:      text not null unique
@@ -19428,7 +19428,7 @@ A `<schema>` block appears as an immediate child of the `<program>` root, alongs
     }
 </>
 
-< db src="./app.db" protect="password_hash" tables="users, posts">
+<db src="./app.db" protect="password_hash" tables="users, posts">
     ${ function getUser(id) {
         return ?{`SELECT id, email, name FROM users WHERE id = ${id}`}.get()
     } }
@@ -19437,19 +19437,19 @@ A `<schema>` block appears as an immediate child of the `<program>` root, alongs
 </program>
 ```
 
-### 39.3 `< schema>` Block Attributes
+### 39.3 `<schema>` Block Attributes
 
-The `< schema>` block takes no attributes. The database path is always read from the enclosing `<program db="...">` attribute.
+The `<schema>` block takes no attributes. The database path is always read from the enclosing `<program db="...">` attribute.
 
 **Normative statements:**
 
-- A `< schema>` block SHALL be valid only inside a file whose `<program>` root element has a `db=` attribute. A `< schema>` block without an enclosing `<program db="...">` SHALL be a compile error (E-SCHEMA-001).
-- A file SHALL NOT contain more than one `< schema>` block. A second `< schema>` block in the same file SHALL be a compile error (E-SCHEMA-002).
+- A `<schema>` block SHALL be valid only inside a file whose `<program>` root element has a `db=` attribute. A `<schema>` block without an enclosing `<program db="...">` SHALL be a compile error (E-SCHEMA-001).
+- A file SHALL NOT contain more than one `<schema>` block. A second `<schema>` block in the same file SHALL be a compile error (E-SCHEMA-002).
 - A `<schema>` block SHALL appear as an immediate child of the `<program>` root. A `<schema>` block nested inside any other block (logic context, component body, `<page>`, `<db>`, etc.) SHALL be a compile error (E-SCHEMA-003).
 
 ### 39.4 Column Types
 
-The `< schema>` block supports a fixed set of column type names that map directly to SQLite affinity types:
+The `<schema>` block supports a fixed set of column type names that map directly to SQLite affinity types:
 
 | scrml type  | SQLite affinity | Notes |
 |---|---|---|
@@ -19462,8 +19462,8 @@ The `< schema>` block supports a fixed set of column type names that map directl
 
 **Normative statements:**
 
-- The compiler SHALL map each `< schema>` column type to its SQLite affinity as specified in the table above.
-- No other column type names SHALL be valid in a `< schema>` block. An unrecognized column type name SHALL be a compile error (E-SCHEMA-004).
+- The compiler SHALL map each `<schema>` column type to its SQLite affinity as specified in the table above.
+- No other column type names SHALL be valid in a `<schema>` block. An unrecognized column type name SHALL be a compile error (E-SCHEMA-004).
 - `boolean` columns SHALL be stored as `INTEGER` in SQLite with values `0` and `1`. The compiler-generated type for the column SHALL be `boolean` in the scrml type system. The compiler SHALL emit read-path coercion (`!!value`) and write-path coercion (`value ? 1 : 0`) in any generated migration or query helper.
 
 ### 39.5 Column Constraints
@@ -19473,7 +19473,7 @@ The `< schema>` block supports a fixed set of column type names that map directl
 Marks the column as the table's primary key. Exactly one column per table MAY be designated `primary key`.
 
 - An `integer primary key` column in SQLite is an alias for the `rowid`. The compiler SHALL use this semantics directly.
-- A `< schema>` table declaration with no `primary key` column SHALL generate a compile warning (W-SCHEMA-001: table has no primary key).
+- A `<schema>` table declaration with no `primary key` column SHALL generate a compile warning (W-SCHEMA-001: table has no primary key).
 
 #### 38.5.2 `not null`
 
@@ -19502,7 +19502,7 @@ Declares a foreign key relationship. The compiler emits a `REFERENCES` clause in
 
 **Normative statements:**
 
-- The referenced table and column SHALL both exist in the `< schema>` declaration (or in the existing database schema, if the referenced table is not being created). A reference to a table not in scope SHALL be a compile error (E-SCHEMA-006).
+- The referenced table and column SHALL both exist in the `<schema>` declaration (or in the existing database schema, if the referenced table is not being created). A reference to a table not in scope SHALL be a compile error (E-SCHEMA-006).
 - Foreign key enforcement in SQLite requires `PRAGMA foreign_keys = ON`. The compiler SHALL emit this pragma at the top of any generated migration script that includes `REFERENCES` clauses.
 
 #### 38.5.6 `rename from identifier`
@@ -19511,7 +19511,7 @@ Signals that a column was previously named `identifier` in the database and shou
 
 **Normative statement:**
 
-- When a column in `< schema>` includes `rename from <old-name>`, and a column named `<old-name>` exists in the current database schema but a column named `<new-name>` does not, the compiler SHALL generate a `RENAME COLUMN` migration instead of a DROP + ADD pair.
+- When a column in `<schema>` includes `rename from <old-name>`, and a column named `<old-name>` exists in the current database schema but a column named `<new-name>` does not, the compiler SHALL generate a `RENAME COLUMN` migration instead of a DROP + ADD pair.
 - If neither `<old-name>` exists in the current database nor `<new-name>` is a new column, `rename from` SHALL be a compile error (E-SCHEMA-007: rename source column does not exist in database).
 
 #### 39.5.7 Additive shared-core validator vocabulary (L4)
@@ -19615,7 +19615,7 @@ Both forms are legal; mixed forms are legal (one column SQL-mirror, another colu
 
 At compile time, the compiler compares two schema representations:
 
-- **Desired state:** The schema declared in `< schema>`.
+- **Desired state:** The schema declared in `<schema>`.
 - **Actual state:** The schema currently stored in the database file named by `<program db="...">`. The compiler reads `sqlite_master` at compile time using Bun's SQLite module.
 
 The compiler produces a diff: a sequence of migration operations needed to bring the actual state to the desired state.
@@ -19655,7 +19655,7 @@ SQLite does not support the full range of `ALTER TABLE` operations (no `MODIFY C
 **Normative statements:**
 
 - The compiler SHALL automatically generate the full-table rebuild sequence for any column change that SQLite cannot perform via simple `ALTER TABLE` syntax on the version of SQLite bundled with the current Bun release.
-- The developer SHALL NOT write these steps manually. The `< schema>` diff compiler owns this generation entirely.
+- The developer SHALL NOT write these steps manually. The `<schema>` diff compiler owns this generation entirely.
 - The compiler SHALL name the intermediate table `<tablename>_migration_new`. If a table with that name already exists in the database at migration time, `scrml migrate` SHALL abort with a descriptive error (the interrupted migration case).
 
 #### 38.6.4 Rename Ambiguity
@@ -19675,10 +19675,10 @@ The compiler cannot automatically distinguish between these two cases when a col
 
 **Normative statements:**
 
-- At compile time, the compiler SHALL validate the `< schema>` block against itself for internal consistency: all `references` targets exist, no duplicate column names within a table, no duplicate table names.
+- At compile time, the compiler SHALL validate the `<schema>` block against itself for internal consistency: all `references` targets exist, no duplicate column names within a table, no duplicate table names.
 - The compiler SHALL NOT fail compilation when the database file does not exist. If the database file is absent, the diff is "all tables need to be created" and the compiler SHALL generate a full `CREATE TABLE` migration. This supports the workflow where the schema is written before the database file is created.
 - The compiler SHALL fail compilation if the database file exists but is not a valid SQLite file (E-SCHEMA-009).
-- The compiler SHALL fail compilation if a `< schema>` column type differs from the actual database column affinity in a way that is not auto-migrated (i.e., the diff requires a type change but the database is production-mode-locked). See §38.8 for `--check` mode.
+- The compiler SHALL fail compilation if a `<schema>` column type differs from the actual database column affinity in a way that is not auto-migrated (i.e., the diff requires a type change but the database is production-mode-locked). See §38.8 for `--check` mode.
 
 ### 39.8 The `scrml migrate` CLI
 
@@ -19693,7 +19693,7 @@ At compile time, the compiler writes two files alongside the database path:
 
 **Normative statements:**
 
-- The compiler SHALL always regenerate `<db-path>.migration.sql` and `<db-path>.migration.json` when a `< schema>` block is present, even if the diff is empty. An empty diff produces a `.sql` file containing only a comment and a `.json` file with an empty operations array.
+- The compiler SHALL always regenerate `<db-path>.migration.sql` and `<db-path>.migration.json` when a `<schema>` block is present, even if the diff is empty. An empty diff produces a `.sql` file containing only a comment and a `.json` file with an empty operations array.
 - If the diff is empty, `<db-path>.migration.sql` SHALL contain the comment `-- No migrations needed. Schema is up to date.`
 
 #### 38.8.2 `scrml migrate` Flags
@@ -19707,29 +19707,29 @@ At compile time, the compiler writes two files alongside the database path:
 
 **Normative statements:**
 
-- `scrml migrate` SHALL refuse to run if `<db-path>.migration.sql` is older than the source file containing the `< schema>` block. The developer MUST recompile before migrating. The error message SHALL say "Schema has changed since last compile. Run `scrml build` first."
+- `scrml migrate` SHALL refuse to run if `<db-path>.migration.sql` is older than the source file containing the `<schema>` block. The developer MUST recompile before migrating. The error message SHALL say "Schema has changed since last compile. Run `scrml build` first."
 - `scrml migrate` SHALL wrap all applied operations in a single SQLite transaction. If any statement fails, the transaction SHALL be rolled back and the database SHALL be unchanged.
 - `scrml migrate` SHALL print a summary of applied operations to stdout on success.
 
-### 39.9 Interaction with `< db>` and `?{}` SQL Contexts
+### 39.9 Interaction with `<db>` and `?{}` SQL Contexts
 
-- A `< schema>` block and a `< db>` block in the same file refer to the same database (from `<program db="..."`). They are complementary, not competing.
-- `< schema>` declares structure. `< db>` scopes queries. The developer MAY have one without the other.
-- A file with only `< schema>` and no `< db>` is valid. The compiler generates the migration artifacts but produces no SQL query infrastructure.
-- A file with `< db>` but no `< schema>` is valid and is the pre-existing behavior from §11. No migration artifacts are generated.
-- Types derived from `< schema>` declarations are available throughout the file, including inside `< db>` blocks and `?{}` SQL templates, without any additional import.
+- A `<schema>` block and a `<db>` block in the same file refer to the same database (from `<program db="..."`). They are complementary, not competing.
+- `<schema>` declares structure. `<db>` scopes queries. The developer MAY have one without the other.
+- A file with only `<schema>` and no `<db>` is valid. The compiler generates the migration artifacts but produces no SQL query infrastructure.
+- A file with `<db>` but no `<schema>` is valid and is the pre-existing behavior from §11. No migration artifacts are generated.
+- Types derived from `<schema>` declarations are available throughout the file, including inside `<db>` blocks and `?{}` SQL templates, without any additional import.
 
 ### 39.10 Interaction with `protect=`
 
-The `< schema>` declaration lists columns by name. The `< db protect="...">` attribute uses column names from that same table. The compiler SHALL validate that every column name in `protect=` exists in either the `< schema>` declaration or the actual database schema. A `protect=` column name with no matching column SHALL be a compile error (E-PA-007, already in §11.3).
+The `<schema>` declaration lists columns by name. The `<db protect="...">` attribute uses column names from that same table. The compiler SHALL validate that every column name in `protect=` exists in either the `<schema>` declaration or the actual database schema. A `protect=` column name with no matching column SHALL be a compile error (E-PA-007, already in §11.3).
 
 ### 39.11 Type System Integration
 
-The `< schema>` block is the authoritative source for table type generation. When both a `< schema>` block and a `< db>` block exist in the same file:
+The `<schema>` block is the authoritative source for table type generation. When both a `<schema>` block and a `<db>` block exist in the same file:
 
-- The compiler generates struct types for each table in `< schema>` before running the `< db>` type inference pass (§14.8).
-- If the database file is absent, the compiler uses `< schema>` alone to generate types (no introspection fallback needed).
-- If the database file exists and the schema is out of sync with `< schema>`, the compiler generates types from the `< schema>` declaration (desired state), not the actual database. The compiler SHALL emit W-SCHEMA-003 when types are generated from `< schema>` and the database is out of sync: "Schema and database differ. Types reflect desired schema. Run `scrml migrate` to sync."
+- The compiler generates struct types for each table in `<schema>` before running the `<db>` type inference pass (§14.8).
+- If the database file is absent, the compiler uses `<schema>` alone to generate types (no introspection fallback needed).
+- If the database file exists and the schema is out of sync with `<schema>`, the compiler generates types from the `<schema>` declaration (desired state), not the actual database. The compiler SHALL emit W-SCHEMA-003 when types are generated from `<schema>` and the database is out of sync: "Schema and database differ. Types reflect desired schema. Run `scrml migrate` to sync."
 
 **Lifecycle-annotation cross-reference (S130 — HU-1 Q4=a).** Schema-field lifecycle annotation `(A to B)` semantics are governed by §14.12 (the canonical home for lifecycle annotation). §39 is a downstream consumer of the §14.12 rule for the schema locus; SQL-shape consequences are documented at §39.11.1 below.
 
@@ -19812,10 +19812,10 @@ rule); §39.1 (`<schema>` opener forms).
 
 | Code | Trigger | Severity |
 |---|---|---|
-| E-SCHEMA-001 | `< schema>` block without `<program db="...">` attribute | Error |
-| E-SCHEMA-002 | More than one `< schema>` block in the same file | Error |
+| E-SCHEMA-001 | `<schema>` block without `<program db="...">` attribute | Error |
+| E-SCHEMA-002 | More than one `<schema>` block in the same file | Error |
 | E-SCHEMA-003 | `<schema>` block nested inside any block other than the `<program>` root | Error |
-| E-SCHEMA-004 | Unrecognized column type name in `< schema>` | Error |
+| E-SCHEMA-004 | Unrecognized column type name in `<schema>` | Error |
 | E-SCHEMA-005 | `default(...)` value is syntactically invalid SQL | Error |
 | E-SCHEMA-006 | `references` targets a table or column not in scope | Error |
 | E-SCHEMA-007 | `rename from` source column does not exist in the database | Error |
@@ -19823,7 +19823,7 @@ rule); §39.1 (`<schema>` opener forms).
 | E-SCHEMA-009 | Database file exists but is not a valid SQLite file | Error |
 | W-SCHEMA-001 | Table declaration has no primary key | Warning |
 | W-SCHEMA-002 | Migration diff contains a destructive operation (DROP TABLE or DROP COLUMN) | Warning |
-| W-SCHEMA-003 | Types generated from `< schema>` desired state; database is out of sync | Warning |
+| W-SCHEMA-003 | Types generated from `<schema>` desired state; database is out of sync | Warning |
 
 ---
 
@@ -21216,7 +21216,7 @@ The function-call form is canonical. A markup-element form (`<schemaFor for=User
 
 - A struct field whose declared type is the canonical nullable union `T | not` (§42), or the `T?` sugar form (§5721 — `T?` SHALL be desugared to `T | not` before type checking), where `T` is a v1.0-mappable base type (`string` / `integer` / `real` / `boolean` / `timestamp` / a bare-variant enum), SHALL lower to a **NULLABLE column** of the base `T`'s SQL column type. The lowering is the base `T`'s column WITHOUT the `NOT NULL` constraint (i.e. WITHOUT a shared-core `req` predicate — `req` is what §39.5.8 lowers to `NOT NULL`).
 
-- This is the exact INVERSE of §14.8.3, which normatively maps `ColumnDef.nullable === true` ↔ a field type of `T | not` in the DB-introspection direction. `schemaFor` closes the round-trip: a `T | not` field lowers back to a nullable column. A struct round-tripped through `< db>` introspection (§14.8.3) and `schemaFor` SHALL preserve column nullability.
+- This is the exact INVERSE of §14.8.3, which normatively maps `ColumnDef.nullable === true` ↔ a field type of `T | not` in the DB-introspection direction. `schemaFor` closes the round-trip: a `T | not` field lowers back to a nullable column. A struct round-tripped through `<db>` introspection (§14.8.3) and `schemaFor` SHALL preserve column nullability.
 
 - A nullable union qualifies ONLY when it is EXACTLY `[T, not]` — a two-member union with EXACTLY one `not` member; member order is irrelevant (`not | string` ≡ `string | not`). A non-`| not` union (e.g. `string | integer`), a union with more than two members, or a degenerate `not | not` SHALL still emit `E-SCHEMAFOR-NO-SQL-MAPPING` per §41.15.8 — the v1.0 SQL model maps a column to a single scalar type, and a heterogeneous union has no single column type.
 
@@ -22078,27 +22078,27 @@ Deferred to SPEC-ISSUE-018. Current workaround: `^{}` meta with direct Bun.SQL `
 | E-SQL-006 | `.prepare()` called on `?{}` result | Error |
 | E-SQL-007 | `?{}` in a non-async context | Error |
 | E-SQL-008 | `?{` SQL block has no matching `}` — unterminated template (F-SQL-001) | Error |
-| E-SQL-009 | `export server function` containing `?{}` declared in a pure-fn file without a top-level `< db src=>` block (§21.5.1, F-AUTH-002) | Error |
+| E-SQL-009 | `export server function` containing `?{}` declared in a pure-fn file without a top-level `<db src=>` block (§21.5.1, F-AUTH-002) | Error |
 
 #### 44.7.1 Module-with-db-context (F-AUTH-002)
 
 **Added:** F-AUTH-002, 2026-04-30. Source: docs/deep-dives/systemic-silent-failure-sweep-2026-04-30.md §5.1.
 
-A pure-fn file (§21.5) MAY declare a top-level `< db src="...">` block.
+A pure-fn file (§21.5) MAY declare a top-level `<db src="...">` block.
 Server functions defined inside such a block resolve their `?{}` placeholders
-against the file's own `< db>` context — the file is then a
-**module-with-db-context**. The compiler treats the `< db>` block as the
+against the file's own `<db>` context — the file is then a
+**module-with-db-context**. The compiler treats the `<db>` block as the
 SQL-resolution scope for any `?{}` inside the block, equivalent to a
 `<program db=>` ancestor.
 
 **Normative statements:**
 
-- A pure-fn file MAY contain at most one top-level `< db src="...">` block.
+- A pure-fn file MAY contain at most one top-level `<db src="...">` block.
 - Server functions inside that block SHALL have their `?{}` placeholders
   resolved against the block's `src` value (per §44.2 driver classification).
 - A `<program db=>` ancestor in the importing page SHALL NOT override the
-  pure-fn module's own `< db>` context — the module owns its connection.
-- A pure-fn file that contains `?{}` AND does not declare a `< db>` block
+  pure-fn module's own `<db>` context — the module owns its connection.
+- A pure-fn file that contains `?{}` AND does not declare a `<db>` block
   SHALL be a compile error (E-SQL-009).
 - The fully-realized cross-file lifecycle (auto-detection of pure-fn files,
   emission as ES module, server route generation, importing-page wiring)
@@ -22867,9 +22867,9 @@ method / handler) but wasteful.
 
 ### 48.1 Overview
 
-`fn` declares a pure function with compiler-enforced purity constraints. It is THE canonical pure form; `pure function` (§33) is its deprecated long-form synonym (W-PURE-DEPRECATED) — the two forms are semantically equivalent at the declaration site. `fn` is NOT a state factory, NOT a typestate transition site, and NOT a life-cycle progression primitive. State construction, progression, and life-cycle rules live on `< StateName>` blocks (§54) and `< machine>` declarations (§51).
+`fn` declares a pure function with compiler-enforced purity constraints. It is THE canonical pure form; `pure function` (§33) is its deprecated long-form synonym (W-PURE-DEPRECATED) — the two forms are semantically equivalent at the declaration site. `fn` is NOT a state factory, NOT a typestate transition site, and NOT a life-cycle progression primitive. State construction, progression, and life-cycle rules live on `<StateName>` blocks (§54) and `<machine>` declarations (§51).
 
-`fn` may return any value type: `< state>` objects, primitives (boolean, number, string), arrays, or plain objects. Purity constraints (§48.3) apply to every `fn` body. Return-site completeness for state construction is enforced at every state literal site by E-STATE-COMPLETE (§54), not at `fn` return sites — E-FN-006 is retired and its role is subsumed by E-STATE-COMPLETE emitted at each `< StateName>` literal's closing tag.
+`fn` may return any value type: `<state>` objects, primitives (boolean, number, string), arrays, or plain objects. Purity constraints (§48.3) apply to every `fn` body. Return-site completeness for state construction is enforced at every state literal site by E-STATE-COMPLETE (§54), not at `fn` return sites — E-FN-006 is retired and its role is subsumed by E-STATE-COMPLETE emitted at each `<StateName>` literal's closing tag.
 
 The compiler enforces one layer of constraints on every `fn` body:
 
@@ -22905,7 +22905,7 @@ fn-statement    ::= let-decl | const-decl | lin-decl | if-stmt | match-expr
 
 ```scrml
 let makePoint = fn(x, y) {
-    let p = < Point>
+    let p = <Point>
     p.x = x
     p.y = y
     return p
@@ -22920,7 +22920,7 @@ All constraints of §48.3 through §48.6 apply to anonymous `fn` expressions ide
 
 ```scrml
 fn buildUser(name, age) {
-    let u = < User>
+    let u = <User>
     u.name = name
     u.age  = age
     return u
@@ -22939,7 +22939,7 @@ The following five constructs SHALL NOT appear anywhere inside a `fn` body, incl
 // Invalid — E-FN-001
 fn buildProfile(id) {
     let row = ?{ SELECT * FROM users WHERE id = $id }
-    let p = < Profile>
+    let p = <Profile>
     p.name = row.name
     return p
 }
@@ -22969,7 +22969,7 @@ The compiler detects DOM mutation via a known-identifier list at the TS stage. U
 // Invalid — E-FN-002
 fn buildWidget() {
     let el = document.createElement("div")   // Error
-    let w = < Widget>
+    let w = <Widget>
     w.el = el
     return w
 }
@@ -22994,7 +22994,7 @@ ${
     // Invalid — E-FN-003
     fn buildItem(name) {
         counter = counter + 1   // mutation of outer variable
-        let item = < Item>
+        let item = <Item>
         item.name = name
         item.seq  = counter
         return item
@@ -23022,7 +23022,7 @@ This list is exhaustive for the initial version. Future amendments MAY extend it
 ```scrml
 // Invalid — E-FN-004
 fn buildSession(userId) {
-    let s = < Session>
+    let s = <Session>
     s.userId = userId
     s.token  = crypto.randomUUID()   // Error
     return s
@@ -23042,7 +23042,7 @@ A `fn` that requires asynchronous data (e.g., a server call result) SHALL receiv
 ```scrml
 // Invalid — E-FN-005: async fn declaration
 async fn buildProfile(id) {
-    let p = < Profile>
+    let p = <Profile>
     p.data = await fetchData(id)   // also E-FN-005
     return p
 }
@@ -23052,9 +23052,9 @@ async fn buildProfile(id) {
 
 ### 48.4 Return-Site Completeness — Relocated to §54
 
-**Amended 2026-04-20 (S32).** State-construction completeness, formerly checked at `fn` return sites under E-FN-006, is now checked at every `< StateName>` literal's closing tag under E-STATE-COMPLETE (§54). The check applies universally: inside `fn` bodies, `function` bodies, transition bodies (§54.3), and every other expression position where a state literal is constructed.
+**Amended 2026-04-20 (S32).** State-construction completeness, formerly checked at `fn` return sites under E-FN-006, is now checked at every `<StateName>` literal's closing tag under E-STATE-COMPLETE (§54). The check applies universally: inside `fn` bodies, `function` bodies, transition bodies (§54.3), and every other expression position where a state literal is constructed.
 
-The practical effect for existing `fn` code: identical behavior with a different diagnostic origin point. Where the old diagnostic pointed at `return u`, the new diagnostic points at the `</>` of `< User>...</>` — closer to the actually-unassigned field.
+The practical effect for existing `fn` code: identical behavior with a different diagnostic origin point. Where the old diagnostic pointed at `return u`, the new diagnostic points at the `</>` of `<User>...</>` — closer to the actually-unassigned field.
 
 #### 48.4.1 E-FN-007 — Branch Produces Different State Shape
 
@@ -23066,12 +23066,12 @@ If branches produce incompatible types and no explicit union return type is decl
 // Invalid — E-FN-007: branches return different types, no union declared
 fn buildEntity(kind) {
     if (kind == "user") {
-        let u = < User>
+        let u = <User>
         u.name = "anon"
         u.age  = 0
         return u
     } else {
-        let a = < Admin>
+        let a = <Admin>
         a.name  = "anon"
         a.level = 1
         return a
@@ -23086,12 +23086,12 @@ fn buildEntity(kind) {
 ```scrml
 fn buildEntity(kind) -> User | Admin {
     if (kind == "user") {
-        let u = < User>
+        let u = <User>
         u.name = "anon"
         u.age  = 0
         return u
     } else {
-        let a = < Admin>
+        let a = <Admin>
         a.name  = "anon"
         a.level = 1
         return a
@@ -23113,7 +23113,7 @@ Attempting to `lift` a value past the `fn` boundary (i.e., lifting in a way that
 ${
     fn buildItems(names) {
         for (name of names) {
-            let item = < Item>
+            let item = <Item>
             item.name = name
             lift item      // lifts to fn body scope — this initializes ~ inside fn
         }
@@ -23147,7 +23147,7 @@ If a `fn` body contains an expression that would create a live reactive dependen
 ${ 
     // Invalid — E-FN-009
     fn buildSnapshot() {
-        let s = < Snapshot>
+        let s = <Snapshot>
         s.value = meta.subscribe("count", () => { ... })   // live subscription capture
         return s
     }
@@ -23164,14 +23164,14 @@ A `fn` body MAY call other `fn`-declared functions. The transitivity of `fn` con
 
 ```scrml
 fn buildAddress(city, country) {
-    let a = < Address>
+    let a = <Address>
     a.city    = city
     a.country = country
     return a
 }
 
 fn buildUser(name, city, country) {
-    let u    = < User>
+    let u    = <User>
     let addr = buildAddress(city, country)   // valid: fn calling fn
     u.name    = name
     u.address = addr
@@ -23189,7 +23189,7 @@ A `fn` body SHALL NOT call a `function`-declared callable (§7.3), because `func
 pure function double(x) { return x * 2; }
 
 fn buildScaled(value) {
-    let s = < Scaled>
+    let s = <Scaled>
     s.value = double(value)   // valid: pure function call from fn
     return s
 }
@@ -23199,7 +23199,7 @@ fn buildScaled(value) {
 function effectfulHelper() { @counter = @counter + 1; }   // mutates reactive state
 
 fn buildItem(name) {
-    let i = < Item>
+    let i = <Item>
     i.name = name
     effectfulHelper()   // Invalid — E-FN-003: calls a non-pure function
     return i
@@ -23266,12 +23266,12 @@ fn parseBinary(cursor) {
 
 ### 48.7 Multiple `<state>` Objects in One `fn`
 
-A single `fn` body MAY construct multiple `< state>` objects. **Amended 2026-04-20 (S32):** each state literal is checked independently at its own closing tag by E-STATE-COMPLETE (§54.6.1); there is no longer a consolidated return-site phase check. Multiple literals in one `fn` body produce independent diagnostics, each pointing at the specific unassigned field.
+A single `fn` body MAY construct multiple `<state>` objects. **Amended 2026-04-20 (S32):** each state literal is checked independently at its own closing tag by E-STATE-COMPLETE (§54.6.1); there is no longer a consolidated return-site phase check. Multiple literals in one `fn` body produce independent diagnostics, each pointing at the specific unassigned field.
 
 ```scrml
 fn buildPair(aName, bName) {
-    let a = < Item>
-    let b = < Item>
+    let a = <Item>
+    let b = <Item>
     a.name = aName
     b.name = bName
     return { first: a, second: b }   // both fully loaded — valid
@@ -23375,7 +23375,7 @@ Rationale: `fn` is a pure function, not a query executor. Database access is a c
 </>
 
 fn makePoint(x, y) {
-    let p = < Point>
+    let p = <Point>
     p.x = x
     p.y = y
     return p
@@ -23399,7 +23399,7 @@ Expected: Compiles without error. `makePoint` constructs fully-initialized `Poin
 </>
 
 fn makeRect(x1, y1, x2, y2, label) {
-    let r           = < Rect>
+    let r           = <Rect>
     r.topLeft       = makePoint(x1, y1)
     r.bottomRight   = makePoint(x2, y2)
     r.label         = label
@@ -23419,7 +23419,7 @@ Expected: Compiles without error. `makeRect` calls `fn makePoint` (valid), assig
 
 fn buildTags(names) {
     for (name of names) {
-        let t      = < Tag>
+        let t      = <Tag>
         t.name     = name
         t.priority = 0
         lift t
@@ -23444,12 +23444,12 @@ Expected: Compiles without error. `lift t` inside the `for` loop hoists each ful
 
 fn buildUser(isAdmin, name) -> AdminUser | GuestUser {
     if (isAdmin) {
-        let u  = < AdminUser>
+        let u  = <AdminUser>
         u.name  = name
         u.level = 1
         return u
     } else {
-        let u  = < GuestUser>
+        let u  = <GuestUser>
         u.name = name
         return u
     }
@@ -23470,7 +23470,7 @@ Expected: Compiles without error. Explicit `-> AdminUser | GuestUser` return typ
 </>
 
 fn buildProduct(name, price) {
-    let p  = < Product>
+    let p  = <Product>
     p.name  = name
     p.price = price
     // p.sku never assigned
@@ -23480,7 +23480,7 @@ fn buildProduct(name, price) {
 
 Expected compiler output:
 ```
-E-STATE-COMPLETE: field 'sku' of < Product> is unassigned at literal close.
+E-STATE-COMPLETE: field 'sku' of <Product> is unassigned at literal close.
   Literal opens at line 8, closes at literal's </> (implicit at assignment of `let p`).
   Declared fields: name, price, sku.
   On this evaluation path, sku was never assigned before </>.
@@ -23492,7 +23492,7 @@ E-STATE-COMPLETE: field 'sku' of < Product> is unassigned at literal close.
 ```scrml
 fn buildUserFromDb(id) {
     let row = ?{ SELECT name, age FROM users WHERE id = $id }
-    let u   = < User>
+    let u   = <User>
     u.name  = row.name
     u.age   = row.age
     return u
@@ -23513,7 +23513,7 @@ E-FN-001: `fn buildUserFromDb` contains a `?{}` SQL access at line 2.
 
 ```scrml
 fn buildSession(userId) {
-    let s     = < Session>
+    let s     = <Session>
     s.userId  = userId
     s.id      = crypto.randomUUID()
     s.created = Date.now()
@@ -23536,13 +23536,13 @@ Two errors reported in one pass; compilation continues to find all violations.
 ```scrml
 fn buildEntity(kind) {
     if (kind == "product") {
-        let p    = < Product>
+        let p    = <Product>
         p.name   = "Widget"
         p.price  = 9.99
         p.sku    = "W-001"
         return p
     } else {
-        let c    = < Category>
+        let c    = <Category>
         c.name   = "Widgets"
         c.count  = 0
         return c
@@ -24062,7 +24062,7 @@ fn scanIdent(src, startPos) {
         pos = pos + 1
     }
 
-    let result = < ScanResult>
+    let result = <ScanResult>
     result.value  = buf
     result.endPos = pos
     return result
@@ -24100,7 +24100,7 @@ connection up to five times.
 fn findPair(matrix) {
     let rows = matrix.length
     let cols = matrix[0].length
-    let found = < Found>
+    let found = <Found>
     found.row = -1
     found.col = -1
 
@@ -24452,7 +24452,7 @@ fn scanMatches(str, re) {
     while ((m = re.exec(str)) is some) {
         results.push(m[0])
     }
-    let out = < ScanResult>
+    let out = <ScanResult>
     out.matches = results
     return out
 }
@@ -24470,7 +24470,7 @@ ${
 
     // Invalid — E-FN-003
     fn buildItem(name) {
-        let i = < Item>
+        let i = <Item>
         i.name = name
         // assignment-as-expression to outer-scope `log` — still E-FN-003
         log = [...log, name]
@@ -24694,7 +24694,7 @@ fn parseTokens(input) {
     let tokens = []
     let m = not
     while ((m = tokenRe.exec(input)) is some) {
-        let t   = < Token>
+        let t   = <Token>
         t.value = m[0]
         t.start = m.index
         lift t
@@ -24785,7 +24785,7 @@ The expression `@phase = .Loading` is a single assignment-expression whose resul
 - §1.4 — markup-as-value pillar.
 - §50.3 — assignment-expression result-value semantics (the assigned value IS the expression's result).
 
-## 51. State Transition Rules and `< machine>` State Type
+## 51. State Transition Rules and `<machine>` State Type
 
 **Revised:** 2026-05-04 (S57 Stage 0b D2.8) — added §51.0 (engines as Tier 2 of the case-analysis
 ladder). §51.0 is the v0.next-aligned authoritative entry for new engine declarations
@@ -25967,7 +25967,7 @@ the legacy content disagree on surface syntax, §51.0 is authoritative for new c
   In v0.next P1 both keywords compile; P3 promotes `W-DEPRECATED-001` to
   `E-DEPRECATED-001`.
 - **`rule=` on state-children is the v0.next surface for transitions.** The legacy
-  `transitions {}` block (§51.2) and the `< machine name=... for=...>` named override
+  `transitions {}` block (§51.2) and the `<machine name=... for=...>` named override
   graph (§51.3) remain available for projects already using them and for the
   three-sites cross-check (§51.15).
 - **State-children co-locate transitions with their from-state.** This is the M4 + M12
@@ -26956,7 +26956,7 @@ The design is two-tiered:
   with no reference to runtime state or identity. They are the tightest constraint a caller
   can assume unless overridden.
 
-- **Machine-level transitions** (`< machine name=Name for=EnumType>`) define a named override
+- **Machine-level transitions** (`<machine name=Name for=EnumType>`) define a named override
   graph for a specific context. Machines are bound to reactive variables at declaration time.
   They may include `given` guards that reference runtime state. Multiple machines may govern
   the same enum type.
@@ -26976,8 +26976,8 @@ as illegal — SHALL be rejected at compile time with E-ENGINE-001.
 **Amended 2026-04-20 (S32).** Transition authoring in scrml has three legal sites:
 
 1. **Type-level transitions** (`transitions {}` inside enum declarations, §51.2) — structural default graph for all uses of the enum.
-2. **Machine-level transitions** (`< machine name=Name for=EnumType>`, §51.3) — named override graph with guards, temporal transitions, audit, replay, derived views.
-3. **State-local transitions** (transition declarations inside `< State>` substates, §54.3) — per-substate outgoing edges declared positively at the substate's own point of declaration.
+2. **Machine-level transitions** (`<machine name=Name for=EnumType>`, §51.3) — named override graph with guards, temporal transitions, audit, replay, derived views.
+3. **State-local transitions** (transition declarations inside `<State>` substates, §54.3) — per-substate outgoing edges declared positively at the substate's own point of declaration.
 
 Sites 1 and 3 are authoritative for their respective graphs. Site 2 (machine) is either an independent named override graph, OR an aggregated-derived view synthesized from sites 1 and 3 when the author omits explicit machine-body rules (§51.15).
 
@@ -27020,7 +27020,7 @@ When a `transitions {}` block is present:
 - The `transitions {}` block inside an enum declaration SHALL contain only structural
   `VariantRef => VariantRef` rules. A `given` guard inside a type-level `transitions {}`
   block SHALL be a compile error (E-ENGINE-010: guards are not permitted in type-level
-  `transitions` blocks; use `< machine>` for contextual transitions).
+  `transitions` blocks; use `<machine>` for contextual transitions).
 - Effect blocks inside a type-level `transitions {}` block SHALL be valid. An effect block
   on a transition SHALL execute every time the transition fires, regardless of which
   machine (if any) is governing the assignment.
@@ -27114,12 +27114,12 @@ E-ENGINE-001: Illegal transition.
   OrderStatus has no transition rule from .Delivered.
   .Delivered is a terminal variant.
   Hint: add `.Delivered => .Pending` to OrderStatus.transitions if this move is intended,
-        or bind @status to a < engine> that permits this move.
+        or bind @status to a <engine> that permits this move.
 ```
 
 ---
 
-### 51.3 Machine-Level Transitions — `< machine>`
+### 51.3 Machine-Level Transitions — `<machine>`
 
 #### 51.3.1 Motivation
 
@@ -27127,7 +27127,7 @@ Type-level transitions define the tightest, most general contract for an enum. B
 applications need contextual variation: an admin can reopen a delivered order; a system
 process can force-cancel at any stage; a test harness may bypass all guards.
 
-The `< machine>` declaration provides this. A machine is a **named override graph** for a
+The `<machine>` declaration provides this. A machine is a **named override graph** for a
 specific enum type. It is separate from the enum. Multiple machines may exist for the same
 enum. Each machine is bound to a specific variable at declaration time.
 
@@ -27137,7 +27137,7 @@ The machine carries all behavioral rules for a specific usage context.
 #### 51.3.2 Syntax
 
 ```
-machine-decl   ::= '< machine' MachineName 'for' TypeName '>'
+machine-decl   ::= '<machine' MachineName 'for' TypeName '>'
                    machine-body
                    '/'
 
@@ -27171,7 +27171,7 @@ Positional bindings match variant payload fields by declaration order; named bin
 **Amended (Phase P1, 2026-04-30 — state-as-primary unification):** the canonical
 keyword for this state-type is now `engine`. The pre-P1 `machine` keyword continues
 to compile as a deprecated alias and emits **W-DEPRECATED-001** (warning; configurable
-to error per `compiler-warnings`). Both `< engine name=N for=T>` and `< machine name=N for=T>`
+to error per `compiler-warnings`). Both `<engine name=N for=T>` and `<machine name=N for=T>`
 produce identical AST shapes. The AST node uses `kind: "engine-decl"` with a
 `engineName` field (the P1 `kind: "machine-decl"` / `machineName` shape was renamed
 in S53 by `ast-shape-rename`).
@@ -27207,16 +27207,16 @@ side desugars to the cross-product of single-pair rules before type checking. An
 **Amended (landed S25):** 2026-04-18 — attribute-form opener migration (ratified by
 radical-doubt debate 2026-04-17, see `scrml-support/design-insights.md`, "Machine
 cohesion: opener + guard keyword"). The machine opener uses the attribute form
-`< machine name=Name for=Type>`, matching §5.1 attribute grammar shared by all other
-state types (`< db>`, `< timer>`, `< poll>`, `< request>`, `< timeout>`,
-`< errorBoundary>`). `name=` and `for=` SHALL be bareword-identifier attribute values
+`<machine name=Name for=Type>`, matching §5.1 attribute grammar shared by all other
+state types (`<db>`, `<timer>`, `<poll>`, `<request>`, `<timeout>`,
+`<errorBoundary>`). `name=` and `for=` SHALL be bareword-identifier attribute values
 (§5.1 unquoted-identifier form); quoted-string values SHALL be a compile error.
 Rule-body grammar, `given` guards (§4.11.4), and `[label]` suffix are unchanged. The
 pre-S25 sentence form `< machine Name for Type>` is rejected with E-ENGINE-020 —
 the error message names the required attribute form for straightforward rewriting.
 
 ```scrml
-< engine name=MarioMachine for=MarioState>
+<engine name=MarioMachine for=MarioState>
     .Small        => .Big | .Fire | .Cape
     .Big          => .Fire | .Cape | .Small
     .Fire | .Cape => .Small
@@ -27243,7 +27243,7 @@ type CannonState:enum = {
     Reloading(reason: string)
 }
 
-< engine name=CannonMachine for=CannonState>
+<engine name=CannonMachine for=CannonState>
     .Idle               => .Charging(level: l) given (l >= 0)
     .Charging(n)        => .Firing(shot: s)    given (n >= 50)
     .Charging(n)        => .Idle               given (n < 10)
@@ -27292,7 +27292,7 @@ When governing a **struct type**, a machine's rules use `* => *` wildcard syntax
 `given` guards that reference fields via `self.*`:
 
 ```scrml
-< engine name=DateRange for=Booking> {
+<engine name=DateRange for=Booking> {
     * => * given (self.start < self.end) [valid_date_range]
     * => * given (self.nights > 0 && self.nights < 365) [valid_nights]
 }
@@ -27309,7 +27309,7 @@ loop, or conditional. It MAY be declared inside a `${}` logic block at file scop
 
 **Normative statements:**
 
-- `< machine name=Name for=TypeName>` SHALL declare a named machine governing variables of type
+- `<machine name=Name for=TypeName>` SHALL declare a named machine governing variables of type
   `TypeName`. `TypeName` may be an enum type or a struct type.
 - The machine name SHALL be unique within the file scope. Duplicate machine names in the
   same file SHALL be a compile error (E-ENGINE-003).
@@ -27407,14 +27407,14 @@ type Column:enum = {
 }
 
 // Default machine: forward-only, no reopening
-< engine name=UserFlow for=Column> {
+<engine name=UserFlow for=Column> {
     .Todo       => .InProgress
     .InProgress => .Done
 }
 </>
 
 // Admin machine: full flexibility
-< engine name=AdminFlow for=Column> {
+<engine name=AdminFlow for=Column> {
     .Todo       => .InProgress
     .InProgress => .Done
     .InProgress => .Todo
@@ -27521,7 +27521,7 @@ E-ENGINE-001: Illegal transition.
   AuthState has no transition rule from .Locked.
   .Locked is a terminal variant — no outgoing transitions are declared.
   Hint: to permit unlocking, add `.Locked => .Anonymous` to AuthState.transitions,
-        or create a < engine name=AdminUnlock for=AuthState> with this rule.
+        or create a <engine name=AdminUnlock for=AuthState> with this rule.
 ```
 
 ---
@@ -27540,7 +27540,7 @@ type TaskStatus:enum = {
     Rejected
 }
 
-< engine name=DeveloperFlow for=TaskStatus> {
+<engine name=DeveloperFlow for=TaskStatus> {
     .Backlog  => .Active
     .Active   => .InReview
     .InReview => .Active    // reviewer requests changes
@@ -27549,14 +27549,14 @@ type TaskStatus:enum = {
 }
 </>
 
-< engine name=QAFlow for=TaskStatus> {
+<engine name=QAFlow for=TaskStatus> {
     .InReview => .Done
     .InReview => .Rejected
     .Done     => .InReview  given @currentUser.role === "qa"  // QA can reopen Done
 }
 </>
 
-< engine name=PMFlow for=TaskStatus> {
+<engine name=PMFlow for=TaskStatus> {
     .Backlog  => .Active
     .Active   => .Backlog    // PM deprioritizes
     .Done     => .Active     // PM reopens
@@ -27571,7 +27571,7 @@ type TaskStatus:enum = {
 
 **Normative statement:**
 
-- Multiple `< machine>` declarations for the same `EnumType` SHALL be permitted. Each is
+- Multiple `<machine>` declarations for the same `EnumType` SHALL be permitted. Each is
   an independent named graph. Having two machines for the same enum type is NOT a conflict
   and SHALL NOT produce a compile error or warning.
 
@@ -27617,7 +27617,7 @@ The generated runtime guard:
 **Normative statements:**
 
 - The compiler SHALL generate a transition lookup table for every enum type that has a
-  `transitions {}` block and for every `< machine>` declaration.
+  `transitions {}` block and for every `<machine>` declaration.
 - The lookup table SHALL be a constant object `{ "From.Variant:To.Variant": true }` or
   equivalent O(1) structure.
 - The compiler SHALL NOT emit transition validation work — variant extraction,
@@ -27642,7 +27642,7 @@ The generated runtime guard:
 
 ### 51.6 The `event` Object in Effect Blocks
 
-Effect blocks in both `transitions {}` (type-level) and `< machine>` rules receive an
+Effect blocks in both `transitions {}` (type-level) and `<machine>` rules receive an
 implicit `event` binding:
 
 ```scrml
@@ -27746,7 +27746,7 @@ binding on struct fields; bind the enclosing `@var` to a machine instead).
 | E-ENGINE-007 | Assignment to `event.from` or `event.to` inside an effect block (`event` is read-only) | Compile |
 | E-ENGINE-008 | Reference to `event` outside an effect block (`event` is not in scope) | Compile |
 | E-ENGINE-009 | Machine binding on a `lin` variable (incompatible with linear type semantics) | Compile |
-| E-ENGINE-010 | `given` guard inside a type-level `transitions {}` block (guards require `< machine>`) | Compile |
+| E-ENGINE-010 | `given` guard inside a type-level `transitions {}` block (guards require `<machine>`) | Compile |
 | E-ENGINE-011 | Type-level effect block references a reactive variable outside the enum's file scope | Compile |
 | E-ENGINE-012 | Machine binding on a struct field (not yet supported; bind the enclosing `@var` instead) | Compile |
 | E-ENGINE-013 | `self.fieldName` in a struct-governing machine guard references an undefined field | Compile |
@@ -27824,7 +27824,7 @@ source machine's transition graph**, and the compiler should derive it.
 #### 51.9.2 Syntax
 
 ```
-derived-machine-decl ::= '< machine' MachineName 'for' TypeName 'derived' 'from' '@' SourceVar '>'
+derived-machine-decl ::= '<machine' MachineName 'for' TypeName 'derived' 'from' '@' SourceVar '>'
                          projection-body
                          '/'
 
@@ -27836,7 +27836,7 @@ projection-rule      ::= variant-ref-list '=>' variant-ref                -- map
 **Example:**
 
 ```scrml
-< engine name=UI for=UIMode derived=@order>
+<engine name=UI for=UIMode derived=@order>
     .Draft                                  => .Editable
     .Submitted | .Paid | .Shipping          => .ReadOnly
     .Delivered | .Cancelled | .Refunded     => .Terminal
@@ -27860,7 +27860,7 @@ never the reverse.
   developer does NOT declare it explicitly. It appears as a normal reactive variable to
   readers: `${@ui}` in markup, `match @ui { ... }` in logic.
 - Writes to the projected variable SHALL be a compile error: **E-ENGINE-017** — `Cannot
-  assign to '@{name}' — it is a derived projection of '@{source}' (see < machine
+  assign to '@{name}' — it is a derived projection of '@{source}' (see <machine
   {MachineName}>). Assign to the source instead.`
 - The projection SHALL be total: every variant of the source type MUST be covered by the
   projection rules (directly or via alternation). Non-exhaustive projections SHALL be
@@ -27880,7 +27880,7 @@ never the reverse.
 Derived scalars (`~var = match @source { ... }`) already solve the simple case. The
 difference:
 
-| | `~derived` match | `< machine derived>` |
+| | `~derived` match | `<machine derived>` |
 |---|---|---|
 | Enforces exhaustiveness? | Yes (§18) | Yes (E-ENGINE-018) |
 | Integrates with machine runtime guards? | No | Yes (shares machine event wiring) |
@@ -27921,7 +27921,7 @@ After (with derived machine):
 ```scrml
 <state>: FetchMachine = FetchState.Idle
 
-< engine name=FetchMachine for=FetchState>
+<engine name=FetchMachine for=FetchState>
     .Idle    => .Loading
     .Loading => .Success | .Error
     .Success | .Error => .Idle
@@ -27929,7 +27929,7 @@ After (with derived machine):
 
 type UIFlag:enum = { Idle, Busy, Done, Failed }
 
-< engine name=UI for=UIFlag derived=@state>
+<engine name=UI for=UIFlag derived=@state>
     .Idle              => .Idle
     .Loading           => .Busy
     .Success           => .Done
@@ -27941,7 +27941,7 @@ The four shadow booleans collapse to one projection. Never-drift by construction
 
 #### 51.9.6 Normative Statements
 
-- A derived-machine declaration SHALL use the form `< machine name=Name for=TypeName
+- A derived-machine declaration SHALL use the form `<machine name=Name for=TypeName
   derived=@SourceVar>`. The `derived=@SourceVar` attribute SHALL name a machine-bound
   reactive variable in the current file's scope.
 - The projected variable — named by the **machine name** with its leading uppercase
@@ -27975,7 +27975,7 @@ The four shadow booleans collapse to one projection. Never-drift by construction
 ### 51.11 Audit Clause — `audit @varName`
 
 **Added:** 2026-04-18 — implementation of §2b G (machine-cluster-expressiveness
-deep-dive). Opt-in audit/replay/time-travel support for `< machine>`-governed
+deep-dive). Opt-in audit/replay/time-travel support for `<machine>`-governed
 reactive variables. Prior art: Redux DevTools, Elm Debugger, XState Inspector.
 
 #### 51.11.1 Motivation
@@ -28013,7 +28013,7 @@ ${
     function advance() { @order = OrderStatus.Processing }
 }
 
-< engine name=OrderFlow for=OrderStatus>
+<engine name=OrderFlow for=OrderStatus>
     .Pending    => .Processing
     .Processing => .Shipped
     .Shipped    => .Delivered
@@ -28112,7 +28112,7 @@ existing fields SHALL NOT be renamed or retyped.
 
 #### 51.11.6 Normative Statements
 
-- `< machine>` bodies MAY contain an `audit @varName` clause.
+- `<machine>` bodies MAY contain an `audit @varName` clause.
 - `@varName` SHALL be a declared non-derived reactive variable (E-ENGINE-019
   for violations).
 - The clause SHALL appear at most once per machine (E-ENGINE-019 for
@@ -28214,7 +28214,7 @@ ${
     function start() { @fetch = Fetch.Loading }
 }
 
-< engine name=FetchMachine for=Fetch>
+<engine name=FetchMachine for=Fetch>
     .Idle                => .Loading
     .Loading             => .Done
     .Loading after 30s   => .TimedOut
@@ -28354,7 +28354,7 @@ Two subcases:
 **Added:** 2026-04-18. Implementation of §2b F
 (machine-cluster-expressiveness-2026-04-17.md). Behind the
 `--emit-machine-tests` compile flag, the compiler emits a bun:test suite that
-exercises each `< machine>` declaration against a small set of invariants
+exercises each `<machine>` declaration against a small set of invariants
 derived from its transition table. The slogan: **machine = enforced spec**.
 The declared transition table *is* the oracle; the generated tests confirm
 the compiled machine refuses everything the table does not allow.
@@ -28366,7 +28366,7 @@ require user `~{}` blocks to exist and does not trigger `~{}` emission.
 
 #### 51.13.1 Properties
 
-For each non-derived `< machine>` declaration with a non-empty transition
+For each non-derived `<machine>` declaration with a non-empty transition
 table, the generator SHALL emit tests for the following properties. Phased
 implementation: **phase 1** covers property (a) for machines whose rules
 are all unguarded, payload-free, non-wildcard, and non-temporal.
@@ -28540,7 +28540,7 @@ ${
     function rewindToLatest() { replay(@order, @log) }
 }
 
-< engine name=OrderFlow for=S>
+<engine name=OrderFlow for=S>
     .Pending    => .Processing
     .Processing => .Shipped
     .Shipped    => .Delivered
@@ -28598,7 +28598,7 @@ ${
 
 - **E-REPLAY-001** (compile): First argument to `replay` is not a
   machine-bound reactive. Fires when the target is not an `@`-ref,
-  is a declared reactive that lacks a `< machine>` binding, or is
+  is a declared reactive that lacks a `<machine>` binding, or is
   an undeclared reactive. Message variants surface the specific
   cause: `Replay target '@{name}' must be a machine-bound reactive
   variable. …`
@@ -28668,7 +28668,7 @@ ${
 
 #### 51.15.1 Machine modes (auto-detected)
 
-When a `< machine name=Name for=StateType>` declaration targets a state type that has state-local transitions (§54.3), the machine operates in one of two modes. Mode is auto-detected from the machine body:
+When a `<machine name=Name for=StateType>` declaration targets a state type that has state-local transitions (§54.3), the machine operates in one of two modes. Mode is auto-detected from the machine body:
 
 - **Override mode:** machine body contains one or more transition rules. Machine rules are authoritative for bindings bound to this machine.
 - **Aggregated-derived mode:** machine body is empty (no transition rules). Compiler synthesizes the edge list from state-local transitions. The machine's attached features (guards, audit, replay, etc.) remain available at their declaration sites; only the edge list is synthesized.
@@ -28696,17 +28696,17 @@ Mismatches emit **E-STATE-MACHINE-DIVERGENCE**.
 **Case 1: state-local transition on a machine-bound variable.**
 
 ```scrml
-<sub>: Submission = < Draft> ...</>
-bind @sub -> < engine SubmissionFlow>
+<sub>: Submission = <Draft> ...</>
+bind @sub -> <engine SubmissionFlow>
 @sub = @sub.validate(now)
 ```
 
-The state-local transition body runs (produces the new `< Validated>` value). The machine's assignment check validates the result against `SubmissionFlow`'s rules. Both layers run.
+The state-local transition body runs (produces the new `<Validated>` value). The machine's assignment check validates the result against `SubmissionFlow`'s rules. Both layers run.
 
 **Case 2: state-local transition on a non-machine-bound variable.**
 
 ```scrml
-<sub>: Submission = < Draft> ...</>
+<sub>: Submission = <Draft> ...</>
 @sub = @sub.validate(now)
 ```
 
@@ -28717,9 +28717,9 @@ The state-local transition body runs. No machine rules apply. The assignment is 
 **Case 3: direct reassignment on a machine-bound variable (bypassing state-local).**
 
 ```scrml
-<sub>: Submission = < Draft> ...</>
-bind @sub -> < engine SubmissionFlow>
-@sub = < Validated> id=..., title=..., body=..., validatedAt=now </>
+<sub>: Submission = <Draft> ...</>
+bind @sub -> <engine SubmissionFlow>
+@sub = <Validated> id=..., title=..., body=..., validatedAt=now </>
 ```
 
 No state-local transition is invoked. The machine's assignment check validates the move. This is legal if `SubmissionFlow` permits `Draft => Validated`. State-local transition bodies are NOT run (no method was called).
@@ -28731,11 +28731,11 @@ Emitted when the state-local transitions and the override-mode machine body (or 
 **Diagnostic format:**
 
 ```
-E-STATE-MACHINE-DIVERGENCE: machine 'SubmissionFlow' declares edge < Validated> => < Submitted>,
-  but < Validated> has no matching state-local transition declaration.
-  Either add a transition to < Validated>:
-    submit(now: Date) => < Submitted> { return < Submitted> ... </> }
-  inside < Submission>'s < Validated> body;
+E-STATE-MACHINE-DIVERGENCE: machine 'SubmissionFlow' declares edge <Validated> => <Submitted>,
+  but <Validated> has no matching state-local transition declaration.
+  Either add a transition to <Validated>:
+    submit(now: Date) => <Submitted> { return <Submitted> ... </> }
+  inside <Submission>'s <Validated> body;
   or remove the edge from SubmissionFlow if it should not be reachable.
   (Temporal edges 'after Ns =>' and wildcards '* =>' are exempt from this cross-check.)
 ```
@@ -28806,7 +28806,7 @@ ${ import { DriverStatus } from '../../schema.scrml' }
 
 <status>: DriverStatus = .OffDuty
 
-< engine name=HOSMachine for=DriverStatus>
+<engine name=HOSMachine for=DriverStatus>
   .OffDuty      => .OnDuty | .SleeperBerth
   .OnDuty       => .Driving | .OffDuty
   .Driving      => .OnDuty | .OffDuty
@@ -28886,7 +28886,7 @@ Authority declarations give the compiler enough information to:
 
 State authority in scrml uses a **two-tier model**. The tier is chosen based on whether the state is structured (mapped to a database table) or primitive (a flag, counter, or simple scalar).
 
-**Tier 1 — Type-level authority** applies to state types declared with `< TypeName>`. The `authority=` attribute on the type definition carries the authority contract. Every instance of that type inherits its authority.
+**Tier 1 — Type-level authority** applies to state types declared with `<TypeName>`. The `authority=` attribute on the type definition carries the authority contract. Every instance of that type inherits its authority.
 
 **Tier 2 — Instance-level authority** applies to primitive reactive variables (`@var`). The `server` modifier on the variable declaration marks that variable as server-authoritative.
 
@@ -28952,7 +28952,7 @@ ${
 
     // Tier 1: Card is server-authoritative, backed by the `cards` table.
     // Every <Card> instance inherits this contract.
-    < Card authority="server" table="cards">
+    <Card authority="server" table="cards">
         id: number
         title: string
         description: string
@@ -28962,7 +28962,7 @@ ${
 
     // Tier 1: EditState is client-local (no authority= — default).
     // Compiler generates no sync for <EditState> instances.
-    < EditState>
+    <EditState>
         editingId: number | not
         draftTitle: string
         draftDescription: string
@@ -29014,7 +29014,7 @@ Expected compiler output: no errors. `@cards` is server-authoritative (type cont
 
 ```scrml
 // Error: authority="server" requires table=
-< BadCard authority="server">
+<BadCard authority="server">
     id: number
     title: string
 </>
@@ -29026,8 +29026,8 @@ Expected compiler output:
 ```
 E-AUTH-003: State type 'BadCard' declares authority="server" but has no table= attribute.
   The compiler cannot generate sync infrastructure without a database table mapping.
-  Add table="<tablename>" to the < BadCard> declaration.
-  → < BadCard authority="server" table="your_table_name">
+  Add table="<tablename>" to the <BadCard> declaration.
+  → <BadCard authority="server" table="your_table_name">
 ```
 
 #### 52.3.7 Worked Example — Invalid (Type Used in Conflicting Authority Contexts)
@@ -29035,7 +29035,7 @@ E-AUTH-003: State type 'BadCard' declares authority="server" but has no table= a
 This restriction prevents a single type from appearing in two authority contexts in the same program. If the same data shape is needed in two authority contexts, declare two distinct types.
 
 ```scrml
-< Card authority="server" table="cards">
+<Card authority="server" table="cards">
     id: number
     title: string
 </>
@@ -29043,7 +29043,7 @@ This restriction prevents a single type from appearing in two authority contexts
 // This is the correct pattern for the "composing before submit" case.
 // CardDraft is a DIFFERENT TYPE — client-local.
 // They happen to share fields, but they have different lifecycles.
-< CardDraft>
+<CardDraft>
     title: string
     column: string
 </>
@@ -29092,7 +29092,7 @@ A `<var server>` declaration tells the compiler:
 4. **Re-fetch:** The developer's server fn performs its own re-fetch (e.g., `return ?{`SELECT ...`}.all()` after the write); the assignment lands that authoritative value. There is no separate compiler-generated re-fetch (§52.6.4).
 5. **SSR pre-render:** Server-authoritative vars are populated on the server during SSR and emitted into the initial HTML. Client-local vars are not pre-rendered; they use their declared initial value.
 
-A `<var server>` declaration at the instance level is appropriate for primitive reactive state: loading flags, counters, IDs, simple scalar values. For structured data that maps to a database table, Tier 1 (type-level authority via `< Type authority="server" table="...">`) SHOULD be used instead.
+A `<var server>` declaration at the instance level is appropriate for primitive reactive state: loading flags, counters, IDs, simple scalar values. For structured data that maps to a database table, Tier 1 (type-level authority via `<Type authority="server" table="...">`) SHOULD be used instead.
 
 #### 52.4.3 Initial Value Semantics
 
@@ -29356,7 +29356,7 @@ function onClick() { @count = bumpCount() }   // §52 gives the immediate-local 
 ```
 
 The cell's `<count server> = 0` initializer is the placeholder (§52.4.3); the dev's `?{}` writes into the
-dev's own `< schema>` table (typed, queryable, migratable via §39). This keeps a **single** server store —
+dev's own `<schema>` table (typed, queryable, migratable via §39). This keeps a **single** server store —
 the developer's schema — with no hidden compiler table.
 
 If a `<var server>` cell has a LOAD convention but **no detected WRITE path** and is nevertheless assigned
@@ -29408,12 +29408,12 @@ with an explicit `?{}` UPDATE, then fans the batch out with **one** `broadcast()
 
   ${
       // The authority: the server owns the world. Tier-1 type-level authority (§52.3).
-      < World authority="server" table="cells">
+      <World authority="server" table="cells">
           idx: int
           nonce: int
           lockedBy: int
       </>
-      < World> @cells          // server-authoritative; read-side sync auto-generated (§52.3.2)
+      <World> @cells          // server-authoritative; read-side sync auto-generated (§52.3.2)
   }
 
   <channel name="world" topic="world">
@@ -29478,7 +29478,7 @@ channel cell — operate on payload/args and broadcast a value derived from them
 A state type MAY have both:
 
 ```scrml
-< User authority="server" table="users" protect="passwordHash, sessionToken">
+<User authority="server" table="users" protect="passwordHash, sessionToken">
     id: number
     email: string
     displayName: string
@@ -29522,7 +29522,7 @@ The authority model directly controls which state is pre-rendered during SSR.
 
 `<request>` (§6.7.7) is a single-shot async fetch primitive. It is not a continuous authority declaration.
 
-`<var server>` and `< Type authority="server">` are continuous authority declarations: the compiler generates sync infrastructure that persists for the lifetime of the component.
+`<var server>` and `<Type authority="server">` are continuous authority declarations: the compiler generates sync infrastructure that persists for the lifetime of the component.
 
 The two constructs are not interchangeable:
 
@@ -29752,7 +29752,7 @@ The Tier 2 example has three independent singleton cells — the right reach whe
 scrml distinguishes two categories of value constraint:
 
 **Contextual constraints** — the validity of a mutation depends on prior state, sibling fields,
-or external reactive references. These are governed by `< machine>` (§51). Examples:
+or external reactive references. These are governed by `<machine>` (§51). Examples:
 - Enum transition rules (depends on current variant)
 - Cross-field struct invariants (depends on sibling field values)
 - Constraints referencing reactive variables (`<=@maxMana`)
@@ -29873,7 +29873,7 @@ and reject the program.
 
 ### §53.3.2 The Stateless Test
 
-The canonical decision rule for when to use an inline predicate vs a `< machine>`:
+The canonical decision rule for when to use an inline predicate vs a `<machine>`:
 
 > A constraint is **stateless** if its validity can be determined from the incoming value alone,
 > without consulting the variable's prior value, any sibling field, or any reactive reference.
@@ -29883,13 +29883,13 @@ The canonical decision rule for when to use an inline predicate vs a `< machine>
 | `number(>0 && <10000)` | Stateless | Inline predicate |
 | `string(.length > 7 && .length < 255)` | Stateless | Inline predicate |
 | `string(email)` | Stateless | Inline predicate (named shape) |
-| `start < end` on a struct | Contextual (needs sibling) | `< machine for Struct>` |
-| `.Pending => .Processing` | Contextual (needs prior state) | `< machine>` |
-| `number(>=0 && <=@maxMana)` | Contextual (references reactive var) | `< machine>` |
+| `start < end` on a struct | Contextual (needs sibling) | `<machine for Struct>` |
+| `.Pending => .Processing` | Contextual (needs prior state) | `<machine>` |
+| `number(>=0 && <=@maxMana)` | Contextual (references reactive var) | `<machine>` |
 
 The boundary case `number(>=0 && <=@maxMana)` SHALL be rejected with `E-CONTRACT-003` if
 written as an inline predicate, because `@maxMana` is an external reactive reference. The
-developer SHALL express this constraint as a `< machine>` guard instead.
+developer SHALL express this constraint as a `<machine>` guard instead.
 
 ### §53.3.3 Assignment Semantics
 
@@ -30210,11 +30210,11 @@ SHALL take precedence in the compiled output.
 
 ---
 
-## §53.8 Interaction with `< machine>`
+## §53.8 Interaction with `<machine>`
 
 ### §53.8.1 Orthogonality
 
-Inline predicates and `< machine>` are orthogonal enforcement mechanisms. They govern different
+Inline predicates and `<machine>` are orthogonal enforcement mechanisms. They govern different
 aspects of the same variable:
 
 - Inline predicate: "is this incoming value valid on its own?"
@@ -30230,7 +30230,7 @@ type Booking:struct = {
     nights: number(>0 && <365)     // inline predicate on the field
 }
 
-< engine name=ValidBooking for=Booking> {
+<engine name=ValidBooking for=Booking> {
     * => * given (self.start < self.end)   // machine governing the struct
 }
 </>
@@ -30256,16 +30256,16 @@ field-level check already rejects the value.
 If a predicate expression contains any reference to a reactive variable (`@name`), sibling field
 reference (`self.field`), or any identifier that resolves outside the incoming-value scope, the
 compiler SHALL emit `E-CONTRACT-003` at compile time with a message directing the developer to
-use `< machine>` instead.
+use `<machine>` instead.
 
 ```scrml
 // INVALID — @maxMana is an external reactive reference
 <hp>: number(>=0 && <=@maxMana) = 100
 // E-CONTRACT-003: predicate references external reactive variable '@maxMana'.
 // Inline predicates must be stateless.
-// For constraints that reference reactive state, use < machine>.
+// For constraints that reference reactive state, use <machine>.
 // Example:
-//   < machine name=HpRange for=number> {
+//   <machine name=HpRange for=number> {
 //       * => * given (value >= 0 && value <= @maxMana)
 //   }
 //   /
@@ -30350,7 +30350,7 @@ before any validation logic runs.
 The interaction is fully composable:
 
 ```scrml
-< db src="app.db" tables="payments" protect="internalNotes">
+<db src="app.db" tables="payments" protect="internalNotes">
     function submitPayment(amount: number(>0 && <10000)) {
         // protect= enforced: caller must have permission to call this server function
         // predicate enforced: amount must satisfy (>0 && <10000)
@@ -30447,9 +30447,9 @@ E-CONTRACT-003: Inline predicate references external reactive variable '@maxMana
   and its properties. They may not reference reactive variables, sibling fields,
   or any external binding.
 
-  For constraints that depend on external state, use < machine>:
+  For constraints that depend on external state, use <machine>:
 
-    < machine name=HpRange for=number> {
+    <machine name=HpRange for=number> {
         * => * given (value >= 0 && value <= @maxMana)
     }
     /
@@ -30459,7 +30459,7 @@ E-CONTRACT-003: Inline predicate references external reactive variable '@maxMana
 Normative statements:
 > The compiler SHALL emit E-CONTRACT-003 when a predicate expression contains any reference
 > that resolves outside the incoming-value scope.
-> The compiler SHALL include an example of the equivalent `< machine>` construct in the
+> The compiler SHALL include an example of the equivalent `<machine>` construct in the
 > E-CONTRACT-003 message.
 > E-CONTRACT-003 SHALL be emitted at compile time. It is never a runtime error.
 
@@ -30607,9 +30607,9 @@ E-CONTRACT-003: Inline predicate references external reactive variable '@maxScor
   and its properties. They may not reference reactive variables, sibling fields,
   or any external binding.
 
-  For constraints that depend on external state, use < machine>:
+  For constraints that depend on external state, use <machine>:
 
-    < machine name=ScoreRange for=number> {
+    <machine name=ScoreRange for=number> {
         * => * given (value >= 0 && value <= @maxScore)
     }
     /
@@ -30707,7 +30707,7 @@ type ValidAmount = number(>0 && <10000)
 <fee>:   ValidAmount = ...
 ```
 
-This is different from a `< machine>` named binding because the alias is stateless. Whether
+This is different from a `<machine>` named binding because the alias is stateless. Whether
 `type AliaName = base-type(predicate)` is valid scrml syntax is not specified in this section.
 
 Acceptance criteria: a spec section or amendment to §5 (type declarations) defining named
@@ -30996,19 +30996,19 @@ distinction is decided at TAB-time per `W-DEPRECATED-001`).
 
 ### 54.1 Overview
 
-Scrml state types (`< StateName>` blocks declared via §4.2 or §6.3; formerly §11) MAY contain **nested substates** and **state-local transition declarations**. This section defines:
+Scrml state types (`<StateName>` blocks declared via §4.2 or §6.3; formerly §11) MAY contain **nested substates** and **state-local transition declarations**. This section defines:
 
 - The nested substate syntax (§54.2)
 - State-local transition declarations (§54.3)
 - Field visibility and narrowing across substates (§54.4)
 - Terminal states (§54.5)
 - The five new error codes (§54.6)
-- Interaction with `< machine>` declarations (cross-reference to §51.15)
+- Interaction with `<machine>` declarations (cross-reference to §51.15)
 - Interaction matrix with prior scrml features (§54.7)
 
 ### 54.2 Nested Substate Declarations
 
-A nested substate is a `< SubstateName>...</>` block declared inside the enclosing state's body. Substates:
+A nested substate is a `<SubstateName>...</>` block declared inside the enclosing state's body. Substates:
 
 - Inherit the enclosing state's fields (shared fields visible in every substate).
 - MAY declare additional fields specific to that substate (narrowing fields).
@@ -31074,16 +31074,16 @@ state-literal      ::= '<' SubstateName attribute-list? '>' field-assignments '<
 **Worked example:**
 
 ```scrml
-< Submission>
+<Submission>
     id:    string
     title: string
 
-    < Draft>
+    <Draft>
         body:      string
         draftedAt: Date
 
-        validate(now: Date) => < Validated> {
-            return < Validated>
+        validate(now: Date) => <Validated> {
+            return <Validated>
                 id          = from.id
                 title       = from.title
                 body        = from.body
@@ -31092,12 +31092,12 @@ state-literal      ::= '<' SubstateName attribute-list? '>' field-assignments '<
         }
     </>
 
-    < Validated>
+    <Validated>
         body:        string
         validatedAt: Date
 
-        submit(now: Date) => < Submitted> {
-            return < Submitted>
+        submit(now: Date) => <Submitted> {
+            return <Submitted>
                 id          = from.id
                 title       = from.title
                 body        = from.body
@@ -31106,7 +31106,7 @@ state-literal      ::= '<' SubstateName attribute-list? '>' field-assignments '<
         }
     </>
 
-    < Submitted>
+    <Submitted>
         body:        string
         submittedAt: Date
         // zero outgoing transitions -> positively terminal
@@ -31117,7 +31117,7 @@ state-literal      ::= '<' SubstateName attribute-list? '>' field-assignments '<
 **Usage:**
 
 ```scrml
-<sub>: Submission = < Draft> id=uuid() title="Hi" body="..." draftedAt=Date.now() </>
+<sub>: Submission = <Draft> id=uuid() title="Hi" body="..." draftedAt=Date.now() </>
 
 ${ function flow() {
     @sub = @sub.validate(Date.now())   // legal; Draft declares validate()
@@ -31135,9 +31135,9 @@ Narrowing semantics extend the existing §18.17 `is` operator and §42 `not` nar
 
 ```scrml
 match @sub {
-    < Draft>     :> "editing"
-    < Validated> :> "ready"
-    < Submitted> :> "done"
+    <Draft>     :> "editing"
+    <Validated> :> "ready"
+    <Submitted> :> "done"
     // missing any arm -> E-TYPE-020
 }
 ```
@@ -31157,21 +31157,21 @@ Terminal substates are compile-time immutable; the compiler MAY omit runtime mut
 
 #### 54.6.1 E-STATE-COMPLETE
 
-A `< StateName>` literal reaches its closing tag (`</>` or `</StateName>`) with one or more declared fields unassigned on an evaluation path.
+A `<StateName>` literal reaches its closing tag (`</>` or `</StateName>`) with one or more declared fields unassigned on an evaluation path.
 
 **Scope:** universal. Fires wherever a state literal is constructed — inside `fn`, `function`, transition bodies, `lift` contexts, or any other expression position.
 
 **Diagnostic format (required):**
 
 ```
-E-STATE-COMPLETE: field 'X' of < StateName> is unassigned at literal close.
+E-STATE-COMPLETE: field 'X' of <StateName> is unassigned at literal close.
   Literal opens at line A, closes at line B.
   Declared fields: field1, field2, field3, X.
   On this evaluation path, X was never assigned before </>.
   Either assign X before </>, or use an 'if' branch that assigns X on every path reachable from this point.
 ```
 
-This code replaces the pre-2026-04-20 E-FN-006 (which fired only inside `fn` bodies at `return` statements). The universalization means `function buildUser() { let u = < User>; u.name = "x"; return u }` with `u.age` unassigned now fires E-STATE-COMPLETE at `< User>`'s closing tag, where the old grammar would have silently compiled.
+This code replaces the pre-2026-04-20 E-FN-006 (which fired only inside `fn` bodies at `return` statements). The universalization means `function buildUser() { let u = <User>; u.name = "x"; return u }` with `u.age` unassigned now fires E-STATE-COMPLETE at `<User>`'s closing tag, where the old grammar would have silently compiled.
 
 #### 54.6.2 E-STATE-FIELD-MISSING
 
@@ -31180,11 +31180,11 @@ A field read on a binding narrowed to substate X, where the field is declared on
 **Diagnostic format (required — must demonstrate cross-substate hinting):**
 
 ```
-E-STATE-FIELD-MISSING: field 'submittedAt' not readable on binding in substate < Draft>.
-  Field 'submittedAt' is declared on < Submitted>, not < Draft>.
-  @sub is currently narrowed to < Draft> (reached at line M).
-  To reach < Submitted>: apply transitions validate() then submit(), then read.
-  Alternative: use `match @sub { < Submitted> s => s.submittedAt ... }` to narrow first.
+E-STATE-FIELD-MISSING: field 'submittedAt' not readable on binding in substate <Draft>.
+  Field 'submittedAt' is declared on <Submitted>, not <Draft>.
+  @sub is currently narrowed to <Draft> (reached at line M).
+  To reach <Submitted>: apply transitions validate() then submit(), then read.
+  Alternative: use `match @sub { <Submitted> s => s.submittedAt ... }` to narrow first.
 ```
 
 The cross-substate hint naming the field's actual substate is REQUIRED. This is what distinguishes E-STATE-FIELD-MISSING from §18.17's narrowing errors — without it, implementers SHOULD reuse E-TYPE-062 instead.
@@ -31196,12 +31196,12 @@ A state-local transition is called on a binding whose current substate does not 
 **Diagnostic format (required — must name available transitions and terminal hint):**
 
 ```
-E-STATE-TRANSITION-ILLEGAL: transition 'submit()' is not declared on < Validated>.
-  @sub is currently narrowed to < Validated>.
-  < Validated> declares: (none — terminal)
-  If this call should be legal, add a declaration: `submit() => < Target> { return < Target> ... </> }`
-  inside < Submission>'s < Validated> body.
-  If < Validated> should be terminal, the call at line N is a bug.
+E-STATE-TRANSITION-ILLEGAL: transition 'submit()' is not declared on <Validated>.
+  @sub is currently narrowed to <Validated>.
+  <Validated> declares: (none — terminal)
+  If this call should be legal, add a declaration: `submit() => <Target> { return <Target> ... </> }`
+  inside <Submission>'s <Validated> body.
+  If <Validated> should be terminal, the call at line N is a bug.
 ```
 
 When the substate has zero outgoing transitions, the terminal hint is REQUIRED. When it has some but not the called one, the diagnostic names the declared set.
@@ -31213,10 +31213,10 @@ A field write on a binding narrowed to a terminal substate (zero declared outgoi
 **Diagnostic format (required):**
 
 ```
-E-STATE-TERMINAL-MUTATION: cannot mutate field 'body' of < Submitted>.
-  < Submitted> declares zero outgoing transitions — it is positively terminal.
+E-STATE-TERMINAL-MUTATION: cannot mutate field 'body' of <Submitted>.
+  <Submitted> declares zero outgoing transitions — it is positively terminal.
   Terminal-substate fields are frozen after construction.
-  If < Submitted> should admit edits, add a self-transition: `edit() => < Submitted> { ... }`.
+  If <Submitted> should admit edits, add a self-transition: `edit() => <Submitted> { ... }`.
 ```
 
 #### 54.6.5 Summary table
@@ -31232,7 +31232,7 @@ E-STATE-TERMINAL-MUTATION: cannot mutate field 'body' of < Submitted>.
 
 ### 54.7 Interaction Matrix
 
-#### 54.7.1 State-local transitions × `< machine derived=@source>` (§51.9 projection)
+#### 54.7.1 State-local transitions × `<machine derived=@source>` (§51.9 projection)
 
 A projection machine receives a machine-bound variable; when the source changes, projection re-reads. A state-local transition call re-assigns the source reactive, which is a source change; the projection re-reads. No special handling required.
 
@@ -31240,7 +31240,7 @@ A projection machine receives a machine-bound variable; when the source changes,
 
 #### 54.7.2 State-local transitions × `lin` variables
 
-A `lin @sub: Submission` consumed by `@sub = @sub.validate(now)`: the transition body constructs a NEW `< Validated>` literal (from's fields are read, not mutated); linearity is trivially preserved — the old binding is consumed at the `=` assignment.
+A `lin @sub: Submission` consumed by `@sub = @sub.validate(now)`: the transition body constructs a NEW `<Validated>` literal (from's fields are read, not mutated); linearity is trivially preserved — the old binding is consumed at the `=` assignment.
 
 **Normative:** state-local transitions SHALL be compatible with `lin` bindings without special marking.
 
@@ -31274,7 +31274,7 @@ Replay applies to machine-bound variables and bypasses runtime machine guards.
 
 #### 54.7.8 E-STATE-COMPLETE × `lift` in `fn` bodies (§48.5)
 
-**Normative:** `lift < Substate> ... </>` inside a `fn` body — E-STATE-COMPLETE SHALL fire at the `</>` of the lifted literal, at the `lift` statement's location, before the lift accumulates. The `lift` statement does not produce its own diagnostic — the state-literal check runs universally.
+**Normative:** `lift <Substate> ... </>` inside a `fn` body — E-STATE-COMPLETE SHALL fire at the `</>` of the lifted literal, at the `lift` statement's location, before the lift accumulates. The `lift` statement does not produce its own diagnostic — the state-literal check runs universally.
 
 ---
 
