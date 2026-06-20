@@ -1,9 +1,9 @@
-<!-- @digest head=20eb6e39 delta-seq=18 -->
+<!-- @digest head=51d7bd5a delta-seq=22 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `20eb6e39`** + delta-log **[18]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `20eb6e39`
+> **HEAD `51d7bd5a`** + delta-log **[22]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `51d7bd5a`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,25 +13,26 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `20eb6e39`
+## Board — from `@gap` tokens @ `51d7bd5a`
 - **HIGH 0** · MED 12 · LOW 19 · Nominal 8
 - Named open HIGHs: _none_
 
-## Recent rulings — last 3 `rule` (delta-log S209 — 2026-06-19)
+## Recent rulings — last 4 `rule` (delta-log S209 — 2026-06-19)
 - `[6]` rule · GRAFT RATIFIED (user "record pa direct") — ship a-A(reason-death list)+b-B(footprint surface) as INVESTIGATION-SURFACES-WITH-CONTEXT not scores; gate b-A(dock-r… → design-insights.md
 - `[9]` rule · sPA AUTONOMY CORRECTION (user "they need to run autonomously. I had to nudge 1 along" + "Im still answering Qs for 11"). ENCODED: spa-scrml.md §"Standing autono… → spa-scrml.md + spa.md
 - `[11]` rule · WORK-PER-TOKEN tracking directive (user pushback) — PA gaining wrap-timing autonomy → START tracking wrap + session-start context draws across sessions; optimiz… → cPA DD curation
+- `[22]` rule · **cPA launch→monitor CORRECTION RATIFIED + LANDED** (user "I can fire sPAs manually" + "land the edit"). Deeper point the user drove (correct): even (b)/(c) don… → cpa-scrml.md + cpa.md + DD OQ#2
 
 ## Recent activity — last 6 `disp`/`land`/`find`/`state`
-- `[13]` land · cPA MV BUILT (user "commit it, then build the cPA MV"; PA-direct, like sPA/deputy contracts). Contract scrml-support/cpa-scrml.md + pointer scrml/cpa.md + 3 dur… → cpa-scrml.md + cpa.md
-- `[14]` disp/land · sPA ss3 (codegen-expr-attr) FIRST AUTONOMOUS full-list run + RE-INTEGRATED (user "integrate and b"). **Autonomy fix VALIDATED** — ran all 6 commits NO nudging,… → f9ccd275 + known-gaps
-- `[15]` state · **S209 CRASH RECOVERY** (fresh PA picked up crashed S209 — NO wrap happened; hand-off was S209-OPEN, HEAD had advanced to f9ccd275). Crash hit mid-[14]: the ss3… → 2c5e7050
 - `[16]` disp/land · **sPA ss11 RE-INTEGRATED** (recovery — instance died pre-re-integration-message; working tree was CLEAN so no uncommitted loss; PARTIAL list). merge b2a63c70 —… → b2a63c70 + spa-lists/ss11.progress.md
 - `[17]` state · giti-006 cross-repo notice RE-SENT (giti/handOffs/incoming/2026-06-19-1807-scrml-to-giti-giti-006-fixed.md). **verify-before-claim CATCH:** [14] recorded "cross… → giti inbox 1807
 - `[18]` state · **DEPUTY DIED at tick 95** (~17:22; the session-only cron `e5b76890` died with the crashed PA instance — no ticks at 17:37/18:07; worktree idle). tick-95 digest… → digest + deputy-maint reset
+- `[19]` disp · DESPACE arc — Part A LANDED+PUSHED (bf390560: §4 opener prose + 5 EBNF + §51/§54 reconciled to no-space-canonical/NR-authoritative; W-MACRO-001 RETIRED; empiric… → bf390560 + a087942d
+- `[20]` disp · **sPA ss2 (engine-codegen) + ss14 (flograph-residuals) LAUNCHED IN PARALLEL** (cPA-workflow first live test). Disjoint surfaces (ss2=emit-engine.ts/engine-graph… → spa/ss2 + spa/ss14 (watch)
+- `[21]` find · **cPA MV first-live-test finding** (cpa-state tick 2, 19:16): cPA smoke-tested status✓ / stow-write-before-act✓ / passthrough-boundary✓, but **sPA-launch was a… → cpa-state tick 2
 
 ## State
-- Version: 0.7.0 · maps: 36 commits behind HEAD (watermark 9afc746e, HEAD 20eb6e39)
+- Version: 0.7.0 · maps: 50 commits behind HEAD (watermark 9afc746e, HEAD 51d7bd5a)
 - Recent wraps:
   - d0c5a96a chore(s208): wrap-finalize — recent-sessions + digest regen at settled HEAD
   - 916fe3ae wrap(s207): close — block-analysis-emit arc complete (D3-D5) + 2 MED codegen fixes + flogence pure-module HIGH (Fix A in-flight)
