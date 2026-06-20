@@ -18,10 +18,11 @@ not deliberation, so nothing irreplaceable lives in its transcript; `scrml-suppo
 
 - **State:** LIVE — steady-state, RE-HYDRATED instance. **S209 active.** **sPA ss9 + ss10 BOTH MERGED** (PA burst: `76c43d7f` ss9 server-authority-keyword [item1 `4a703df4` emit-logic.ts SQL-init-comment fix, items 2-5 parked] + `8687e18a` ss10 e2e-render-map-test-hygiene [items 1-6 landed, 7-8 parked]). **S210 OPEN** — fresh PA BOOTED off the S209-CLOSE hand-off + my T120 digest (reboot-gap CLOSED; F1 dilation realized). S210 PA is active (dispatched `ac894d93` Bug-1 codegen fix; `acf01716` provisioned). Still in flight from S209: ss4 (sent disposition msg → completing) · ss13 (complete, zero-land) · External-backend DD. flogence (renamed S206). main `41422726`. On tick **121**.
 - **Self-poke loop:** `/loop 30m` → **cron `50e233bd` (`9,39 * * * *`), session-only, armed T96.** (OLD crons `39fed15c`→`e5b76890` both died with their instances — CronList empty at boot, no CronDelete needed. A future re-hydration: CronDelete `50e233bd` if still alive, then re-arm its own.)
-- **Last-absorbed delta seq:** S209 **[31]** (T120 absorbed [30] External-backend DD dispatched [scrml-deep-dive `a7fe7a80`, bg no-worktree; user "DD it" — bring-your-own-backend Q] · [31] **S209 FULL WRAP** [user "lets wrap. next pa can land everything"; hand-off rewritten S209-CLOSE + 3 IN-FLIGHT for the next PA to land]). Prior: boot [10]-[18]; [19]-[29]. All informational/contract — NO maintenance-shaped `(vpa:)`.
+- **Last-absorbed delta seq:** **S210 [7]** (T124 absorbed [6] AE ruling (a)→(b) REVERSAL [PA Rule-4 MISS self-corrected: "reject name= on `<engine>`" → re-dispatched form (b); informational] · [7] ss13 NO-EXECUTE re-integration). T123 absorbed S210 [1] COLD boot [Profile A FULL; **digest STALE c2f8f1fd → authoritative fallback** — see ROUTE-TO-PA below] · [2] 3 HIGH triaged [AD g-attr-interp-fn-name-not-renamed · AE · AF, all R26-verified] · [3] 2 HIGH fix dispatches · [4] 3 sibling acks + giti LOW filed · [5] sPA ss4 block-splitter-native-parser RE-INTEGRATED). All informational/contract — NO maintenance-shaped `(vpa:)`. (Prior: S209 boot [10]-[18]; [19]-[31].)
+- **ROUTE TO PA (wrap-digest miss, CONFIRMED):** the S210 cold boot fell back to authoritative because main @ the wrap `41422726` carried my **T117** digest (`c2f8f1fd`), NOT my T120 wrap-regen. Cause: the PA's wrap commit MERGED deputy-maint (up through T119, whose digest was the T117 one — T118/T119 were no-op no-regen) and THEN I regen'd the digest at T120 → too late, the wrap + boot already happened. **Fix: the wrap-time digest regen must be IN main BEFORE the wrap commit** — i.e. the PA pokes the deputy for a final regen + merges it BEFORE wrapping (contract "Operating the live system" step 4), OR the PA regens the digest inline as part of the wrap (pa.md step-0 fallback). Relates to S204/S208 digest-stale-at-boot. (My T121 "F1 dilation realized at the S210 boot" was WRONG — corrected here.)
 - **`deputy-maint` branch:** worktree `/home/bryan-maclee/scrmlMaster/scrml-deputy-maint` (scrmlMaster sibling, OUTSIDE `.claude/worktrees/`). **Tip:** `git rev-parse deputy-maint` (FF'd to `c734ec35` at boot; +1 with the deputy-state update this tick). FF onto main each tick.
 - **node_modules:** the worktree has the symlinks (verified at boot; re-create if missing): `ln -s …/scrml/node_modules ./node_modules` · `…/scrml/compiler/node_modules ./compiler/node_modules`.
-- **Owed maintenance: NONE.** T121: **digest regen'd current @ `51600f0b` seq 31** — my T120 watermark bump to primary.map.md (a digest source) staled the wrap digest; this is the recurring post-maps-commit regen (T102/T106/T114/T121). §3c PASS (no drift), maps current (watermark `41422726` = wrap HEAD), §0 PASS. **S210 PA booted off the T120 wrap digest (F1 dilation realized).** (History: maps FULLY refreshed T101 [2 project-mapper runs]; verified watermark bumps T113 [ast-builder.js] + T120 [emit-logic.ts, wrap]; recent-sessions regen'd at the S209 wrap. Watermark `41422726`.)
+- **Owed maintenance: MAPS DUE-but-DEFERRED (≥2 STRUCTURAL mapped changes — real refresh needed).** S210 landing `8c938a58` changed 5 mapped-src files: `ast-builder.js` (+75), `code-segments.ts` (+151), `engine-statechild-parser.ts` (+33), `expression-parser.ts` (+24), `tokenizer.ts` (+8). ≥2 + SUBSTANTIAL (new parser/codegen logic — NOT a watermark-bump-trivial change like T113/T120; needs a real **project-mapper run**). the S210 PA is mid-burst (agent `a1ad1907` AE-b in flight) → DEFER to burst-settle to avoid re-run. T124: **digest regen'd current @ `3f3fb5c6` seq 7** (deltas [6-7] moved delta-log). §0 PASS, §3c PASS (no drift). (Watermark still `41422726`; the 5 structural files remain owed.)
 - **route to PA (informational, from the maps run):** the 2nd project-mapper flagged a SSOT-dedup follow-on — `engine-statechild-grammar.ts` is the new SSOT, but residual INLINE copies of its constants remain at `engine-statechild-parser.ts`, `native-walker/engine-statechild-walker.ts`, `symbol-table.ts` (not yet deduped to import the SSOT). A clean code follow-on (PA/sPA-owned, not a deputy action).
 - **Coherence:** the PA INTEGRATED my T97 commits into main (FF'd 256c81b6 into ad6ddddf's history — integration contract working); deputy-maint FF'd clean to `51d7bd5a` 0/0. main moved 3× this tick (ad6ddddf→4e7fa0f0→51d7bd5a ss14-merge); re-synced + re-ran maintenance on the final base. This tick re-advances deputy-maint (digest + deputy-state), awaiting the PA's next integration.
 
@@ -37,7 +38,7 @@ not deliberation, so nothing irreplaceable lives in its transcript; `scrml-suppo
 
 ## PA↔vPA protocol — ACK + HEARTBEAT (S205 [19], each tick)
 
-- **heartbeat:** tick **T121** · last-absorbed **[S209 31]** (S210 PA booted but not yet delta-logged — no new entries; next entries will be a `## Session 210` block) · deputy-maint @`51600f0b`+ (this tick: post-watermark-bump digest regen). F3: S210 PA ACTIVE (Bug-1 fix `ac894d93` + `acf01716`); ss4 completing; ss13 complete-pending.
+- **heartbeat:** tick **T124** · last-absorbed **[S210 7]** ([6-7] absorbed; digest regen'd `3f3fb5c6` seq 7) · deputy-maint rebased onto main `956460af` (ss13-reconcile SPEC-INDEX §59 flip). F3: ss13 LANDED [7]; `a1ad1907` = AE-b re-dispatch (engine-name-dual-table) in flight. main fast-moving (S210 active).
 - **ACK (vpa:) [S205 10]** → §3c health-check each tick (standing). **ACK (vpa:) [S205 19]** → ACK+heartbeat each tick (standing). **No new maintenance-shaped `(vpa:)` in [10]–[18]** (all disp/land/rule/state informational). **[11] work-per-token ledger DECLINED-as-not-yet-actionable** (FUTURE deputy responsibility; the work-proxy numerator + token-measurement feasibility are UNRESOLVED + PA/design-owned — not operationalized, so nothing to maintain yet).
 
 ## Standing facts (durable)
@@ -82,20 +83,19 @@ not deliberation, so nothing irreplaceable lives in its transcript; `scrml-suppo
 
 ## In-flight dispatches (F3 watch list)
 
-**T121 watch — S210 PA BOOTED + ACTIVE (reboot-gap closed) → WATCH ONLY, no `(deputy) state` entries.**
-- **S210 PA dispatches:** `agent-ac894d93` @`ad6ae550` ("fix(codegen): Bug 1 g-attr-interp-fn-name-not-renamed") actively working · `agent-acf01716` @`41422726` just-provisioned. Fresh-PA bug-fix work.
-- **sPA `ss4` COMPLETING** — spa/ss4 @`84e68141` (dev-agent `a4e244bf` item7 in-compound const-deriv); sent disposition msg `incoming/2026-06-20-from-spa-ss4-disposition.md`. Pending S210-PA re-integration.
-- **sPA `ss13` COMPLETE — zero-land** (spa/ss13 @`04b8397c`; msg in inbox, pending disposition).
-- **External-backend DD** (`a7fe7a80`) running.
-- **Cross-repo inbox (PA-owned):** flogence-BUG-regex-literal-arg-miscompile · 6nz-p10-bugs+s13-status · giti-forlift-block-match.
-- **On the S210-PA's merge of ss4 → check for mapped src** (GAP-LEDGER/lexeme; queue maps refresh per cadence).
+**T123 watch — S210 PA ACTIVE (just landed a burst + dispatched more) → WATCH ONLY, no `(deputy) state` entries.**
+- **S210 PA dispatch `agent-a1ad1907`** @`faa213c5` ("engine-name-dual-table" = the AE re-dispatch form (b) per [6]) — actively working. The S209-wrap bug-fix agents all LANDED in `8c938a58` + cleaned.
+- **sPA `ss4` LANDED** ([5] `8c938a58`). **sPA `ss13` LANDED** ([7] `c3e9d16e`+reconcile `956460af`, NO-EXECUTE; worktree `../scrml-spa-ss13` still present → PA 6b-cleanup pending).
+- **External-backend DD** (`a7fe7a80`) — S210 PA reads its output.
+- **Board HIGH 0→1** (S210 triaged 3 HIGH AD/AE/AF; 2 dispatched-fixed; net 1 open).
+- **On the S210 burst settling → fire the DEFERRED maps refresh** (5 structural mapped-src files; real project-mapper run).
 - **OFF watch (history):** ss2 `e0f901fa` · ss14 `51d7bd5a` · ss5 `f2ed05ba` · ss6 `6170ee8c` (no-exec) · ss9 `76c43d7f` · ss10 `8687e18a` · despace `a087942d` `4e7fa0f0`.
 - F3 reminder: record a `(deputy) state` entry ONLY if an sPA COMPLETES CLEANLY *while the PA is absent/rebooting*.
 - (Prior S205-S209 agents landed + cleaned: ss1 `37a9a8c9` [7], ss3 `f9ccd275` [14], ss11 `b2a63c70` [16].)
 
-## Currency snapshot (@ tick 121 — S210 OPEN)
+## Currency snapshot (@ tick 124 — S210 active)
 
-- **maps:** watermark **`41422726`** (= main HEAD) — CURRENT. **digest:** current (regen'd @ `51600f0b`, seq 31 — post-T120-watermark-bump). **§0:** PASS. **§3c:** PASS (446n/168e, no drift). board **HIGH 0 · MED 11 · LOW 17 · Nom 8**. **S210 PA booted + active (Bug-1 fix in flight); reboot-gap closed. F1 dilation realized at the S210 boot.** **§0:** gap-counts + recent-sessions PASS. **§3c:** PASS (445n/168e). board **HIGH 0 · MED 11 · LOW 18 · Nom 8** (ground-truth oracle @ HEAD; ss2 reconcile −1 MED).
+- **maps:** watermark **`41422726`** — **DUE-but-DEFERRED** (5 structural mapped-src files in `8c938a58`; real project-mapper run when the S210 burst settles — `a1ad1907` AE-b still in flight). **digest:** current (regen'd @ `3f3fb5c6`, seq 7). **§0:** PASS. **§3c:** PASS (450n/168e). board **HIGH 1 · MED 11 · LOW 17 · Nom 8**. main `956460af`. **(ROUTE-TO-PA wrap-digest miss still open — see Last-absorbed block.)** **§0:** gap-counts + recent-sessions PASS. **§3c:** PASS (445n/168e). board **HIGH 0 · MED 11 · LOW 18 · Nom 8** (ground-truth oracle @ HEAD; ss2 reconcile −1 MED).
 
 ## Maintenance seams (Function 2)
 
