@@ -16,12 +16,12 @@ not deliberation, so nothing irreplaceable lives in its transcript; `scrml-suppo
 
 ## Deputy status (RESUME POINT)
 
-- **State:** LIVE — steady-state, RE-HYDRATED instance. **S209 active.** **sPA ss9 + ss10 BOTH MERGED** (PA burst: `76c43d7f` ss9 server-authority-keyword [item1 `4a703df4` emit-logic.ts SQL-init-comment fix, items 2-5 parked] + `8687e18a` ss10 e2e-render-map-test-hygiene [items 1-6 landed, 7-8 parked]). ss9/ss10 + reconcile [27-29] ABSORBED (T117). main settled `e8a5491f`. **T119: PA launched 2 NEW sPAs — ss4 (in flight, GAP-LEDGER/lexeme) + ss13 (COMPLETE, zero-land park/escalate disposition).** flogence (renamed S206). On tick **119**.
+- **State:** LIVE — steady-state, RE-HYDRATED instance. **S209 active.** **sPA ss9 + ss10 BOTH MERGED** (PA burst: `76c43d7f` ss9 server-authority-keyword [item1 `4a703df4` emit-logic.ts SQL-init-comment fix, items 2-5 parked] + `8687e18a` ss10 e2e-render-map-test-hygiene [items 1-6 landed, 7-8 parked]). **S209 WRAPPED `41422726`** (user "lets wrap. next pa can land everything"). Digest regen'd at wrap HEAD (next-PA-boot ready). **3 IN-FLIGHT for the next PA to land:** ss4 (GAP-LEDGER/lexeme, dev-agent a4e244bf item7) · ss13 (complete, zero-land disposition) · External-backend DD (`a7fe7a80`, bg research). flogence (renamed S206). On tick **120**.
 - **Self-poke loop:** `/loop 30m` → **cron `50e233bd` (`9,39 * * * *`), session-only, armed T96.** (OLD crons `39fed15c`→`e5b76890` both died with their instances — CronList empty at boot, no CronDelete needed. A future re-hydration: CronDelete `50e233bd` if still alive, then re-arm its own.)
-- **Last-absorbed delta seq:** S209 **[29]** (T117 absorbed [27] ss9 server-authority-keyword RE-INTEGRATED · [28] ss10 e2e-render-map-test-hygiene RE-INTEGRATED · [29] ss6 flags B+C TAKEN [user "take B and C"]: B = NEW §54.6.5 code `E-STATE-TRANSITION-NO-RETURN` [spec-ahead/Nominal, enforcement deferred to §54 substate-conformance build → no emission site → not a maps/error-map change]). Reconcile `3dc14e12`. Prior: boot [10]-[18]; [19]-[26]. All informational/contract — NO maintenance-shaped `(vpa:)`.
+- **Last-absorbed delta seq:** S209 **[31]** (T120 absorbed [30] External-backend DD dispatched [scrml-deep-dive `a7fe7a80`, bg no-worktree; user "DD it" — bring-your-own-backend Q] · [31] **S209 FULL WRAP** [user "lets wrap. next pa can land everything"; hand-off rewritten S209-CLOSE + 3 IN-FLIGHT for the next PA to land]). Prior: boot [10]-[18]; [19]-[29]. All informational/contract — NO maintenance-shaped `(vpa:)`.
 - **`deputy-maint` branch:** worktree `/home/bryan-maclee/scrmlMaster/scrml-deputy-maint` (scrmlMaster sibling, OUTSIDE `.claude/worktrees/`). **Tip:** `git rev-parse deputy-maint` (FF'd to `c734ec35` at boot; +1 with the deputy-state update this tick). FF onto main each tick.
 - **node_modules:** the worktree has the symlinks (verified at boot; re-create if missing): `ln -s …/scrml/node_modules ./node_modules` · `…/scrml/compiler/node_modules ./compiler/node_modules`.
-- **Owed maintenance: MAPS owed-BATCHING (1 new mapped change).** ss9 item1 (`4a703df4`) touched `compiler/src/codegen/emit-logic.ts` (SQL-init inferred-boundary comment fix) — 1 mapped change since the T113 watermark `85d9e958` → 1 < ≥2 → BATCH (≥10-tick clock reset at T113). Refresh on 2nd change / ≥10 ticks / wrap. **DIGEST regen'd current** @ `c2f8f1fd` seq 29 (reconcile `3dc14e12` moved known-gaps+delta-log → was STALE). §0 PASS, §3c green (no drift, post-rebase). gap-reconcile [27-29] ABSORBED. (History: maps FULLY refreshed T101 [2 project-mapper runs, ss2 engine-statechild surface]; ≥10-tick batch cleared T113 via verified watermark bump for ast-builder.js [map-irrelevant internal change]. Maps watermark `85d9e958`.)
+- **Owed maintenance: NONE — S209 WRAP tick fully maintained (next-PA-boot ready).** ① **DIGEST regen'd current @ `41422726` seq 31** = the LOAD-BEARING wrap action (next PA's session-start finds `digest: current` + thins). ② **recent-sessions REGEN'd** (`state.ts --write`; wrap added a session → was STALE; now PASS). ③ **MAPS wrap-with-src-owed CLEARED** via verified watermark bump `85d9e958`→`41422726`: emit-logic.ts (only mapped-src change) verified map-IRRELEVANT (4-line emitted-comment tweak "server function"→"server-side function"; no structural/edge/code change — T113-style). ④ §0 PASS, §3c re-emitted (446n, drift cleared). (History: maps FULLY refreshed T101 [2 project-mapper runs]; verified watermark bumps T113 [ast-builder.js] + T120 [emit-logic.ts]. Watermark `41422726`.)
 - **route to PA (informational, from the maps run):** the 2nd project-mapper flagged a SSOT-dedup follow-on — `engine-statechild-grammar.ts` is the new SSOT, but residual INLINE copies of its constants remain at `engine-statechild-parser.ts`, `native-walker/engine-statechild-walker.ts`, `symbol-table.ts` (not yet deduped to import the SSOT). A clean code follow-on (PA/sPA-owned, not a deputy action).
 - **Coherence:** the PA INTEGRATED my T97 commits into main (FF'd 256c81b6 into ad6ddddf's history — integration contract working); deputy-maint FF'd clean to `51d7bd5a` 0/0. main moved 3× this tick (ad6ddddf→4e7fa0f0→51d7bd5a ss14-merge); re-synced + re-ran maintenance on the final base. This tick re-advances deputy-maint (digest + deputy-state), awaiting the PA's next integration.
 
@@ -37,7 +37,7 @@ not deliberation, so nothing irreplaceable lives in its transcript; `scrml-suppo
 
 ## PA↔vPA protocol — ACK + HEARTBEAT (S205 [19], each tick)
 
-- **heartbeat:** tick **T119** · last-absorbed **[S209 29]** (no new entries — main quiescent @`e8a5491f`; ss4+ss13 launched but not delta-logged) · deputy-maint @`3649719c`+ (T118 no-op). F3: ss4 (in flight) + ss13 (complete, zero-land).
+- **heartbeat:** tick **T120 (S209 WRAP)** · last-absorbed **[S209 31]** (wrap absorbed; digest regen'd at wrap HEAD `41422726`) · deputy-maint @`41422726`+ (PA integrated my batch at the wrap-merge, 0/0 then re-advanced). F3: ss4 (in flight, dev-agent a4e244bf item7) + ss13 (complete, zero-land) + External-backend DD running. **Next session = fresh PA boots off the S209-CLOSE hand-off + my current digest.**
 - **ACK (vpa:) [S205 10]** → §3c health-check each tick (standing). **ACK (vpa:) [S205 19]** → ACK+heartbeat each tick (standing). **No new maintenance-shaped `(vpa:)` in [10]–[18]** (all disp/land/rule/state informational). **[11] work-per-token ledger DECLINED-as-not-yet-actionable** (FUTURE deputy responsibility; the work-proxy numerator + token-measurement feasibility are UNRESOLVED + PA/design-owned — not operationalized, so nothing to maintain yet).
 
 ## Standing facts (durable)
@@ -81,18 +81,19 @@ not deliberation, so nothing irreplaceable lives in its transcript; `scrml-suppo
 
 ## In-flight dispatches (F3 watch list)
 
-**T119 watch — PA ALIVE (launched ss4+ss13) → WATCH ONLY, no `(deputy) state` entries.**
-- **sPA `ss4` IN FLIGHT.** spa/ss4 @`044c9d43` ("items 3+4 — corpus GAP-LEDGER verified; flip 5 lexemes"); actively working, no complete-msg. Watch.
-- **sPA `ss13` COMPLETE — zero-land disposition.** spa/ss13 @`04b8397c` ("whole-list disposition — park/escalate ×5, zero landed"); msg `incoming/2026-06-20-from-spa-ss13-disposition.md`, pending PA disposition (like ss6's no-execute — correct stand-down, not failure).
-- **Cross-repo inbox (PA-owned, NOT deputy):** `1217-6nz...p10-bugs+s13-status` · `1215-giti...forlift-block-match-misleading-error`. Noted for awareness only.
-- **On PA-merge of ss4 → check for mapped src** (GAP-LEDGER/lexeme work may touch compiler/src; queue maps refresh per cadence).
+**T120 (S209 WRAP) watch — session wrapped; a FRESH PA boots next to LAND the in-flight. Deputy keeps looping (F3 reboot-bridge active).**
+- **sPA `ss4` IN FLIGHT.** spa/ss4 @`207064d9` (dev-agent `agent-a4e244bf` @`65a52043` "item 7 blocker (b) — un-skip §B8.3/§B8.6 in-compound derived tests"). No complete-msg. **F3 reboot-bridge: if ss4 completes while the fresh PA hasn't booted, record a `(deputy) state` entry so the new PA re-attaches.**
+- **sPA `ss13` COMPLETE — zero-land disposition** (spa/ss13 @`04b8397c`; msg in inbox, pending PA disposition).
+- **External-backend DD** (`a7fe7a80`, bg no-worktree) running — the next PA reads its output.
+- **Cross-repo inbox (PA-owned):** `1217-6nz...p10-bugs+s13-status` · `1215-giti...forlift-block-match-misleading-error`.
+- **On the fresh PA's merge of ss4 → check for mapped src** (GAP-LEDGER/lexeme work may touch compiler/src; queue maps refresh per cadence).
 - **OFF watch (history):** ss2 `e0f901fa` · ss14 `51d7bd5a` · ss5 `f2ed05ba` · ss6 `6170ee8c` (no-exec) · ss9 `76c43d7f` · ss10 `8687e18a` · despace `a087942d` `4e7fa0f0`.
 - F3 reminder: record a `(deputy) state` entry ONLY if an sPA COMPLETES CLEANLY *while the PA is absent/rebooting*.
 - (Prior S205-S209 agents landed + cleaned: ss1 `37a9a8c9` [7], ss3 `f9ccd275` [14], ss11 `b2a63c70` [16].)
 
-## Currency snapshot (@ tick 119)
+## Currency snapshot (@ tick 120 — S209 WRAP)
 
-- **maps:** watermark **`85d9e958`** — owed-BATCHING (ss9 `emit-logic.ts` = 1 mapped change; BATCH). **digest:** current (`c2f8f1fd`, seq 29). **§0:** PASS. **§3c:** PASS (445n/168e, no drift). board **HIGH 0 · MED 11 · LOW 17 · Nom 8**. main `e8a5491f`. **F3: ss4 (in flight) + ss13 (complete, zero-land) — both PA-pending.** **§0:** gap-counts + recent-sessions PASS. **§3c:** PASS (445n/168e). board **HIGH 0 · MED 11 · LOW 18 · Nom 8** (ground-truth oracle @ HEAD; ss2 reconcile −1 MED).
+- **maps:** watermark **`41422726`** (= wrap HEAD) — CURRENT (wrap-with-src-owed cleared via verified bump; emit-logic.ts map-irrelevant). **digest:** current (regen'd @ `41422726`, seq 31 — wrap-time load-bearing regen). **§0:** PASS (gap-counts + recent-sessions regen'd). **§3c:** PASS (446n/168e, re-emitted). board **HIGH 0 · MED 11 · LOW 17 · Nom 8**. **main `41422726` (S209 CLOSE). Everything current for the next PA's cold boot.** **§0:** gap-counts + recent-sessions PASS. **§3c:** PASS (445n/168e). board **HIGH 0 · MED 11 · LOW 18 · Nom 8** (ground-truth oracle @ HEAD; ss2 reconcile −1 MED).
 
 ## Maintenance seams (Function 2)
 
