@@ -174,7 +174,7 @@ The compiler is the dev's best friend. That phrase comes up a lot in my notes. T
 
 Server-side concerns don't disappear. They just stop being plumbing.
 
-- **Auth.** Still your job. The `server` annotation is described in the spec as a security escape hatch precisely because compile-time inference of "what touches protected data" is not always sufficient on its own (§11.4). Annotate auth-touching functions with `server` explicitly.
+- **Auth.** Still your job. The `server` annotation is described in the spec as a security escape hatch precisely because compile-time inference of "what touches protected data" is not always sufficient on its own (§52). Annotate auth-touching functions with `server` explicitly.
 - **Rate limiting.** A `<program ratelimit="100/min">` attribute generates a sliding-window limiter (§39.2.4). Tune the rate to your business; the mechanism is built in.
 - **Input validation against business rules.** Predicates handle shape and range. Business rules ("this user can submit at most 3 of these per day") are still business logic. They live inside the `server fn`. They benefit from running where the data lives.
 
@@ -208,11 +208,11 @@ This block is an HTML comment so it does not render on dev.to.
 - Companion published: `npm-myth-devto-2026-04-28.md` (CSRF mint-on-403 prior framing; soft-rephrased here per spec validation).
 - Companion published: `lsp-and-giti-advantages-devto-2026-04-28.md` (verification log structure pattern).
 - Agent: `/home/bryan/.claude/agents/scrml-voice-author.md` (article mode, gate cleared per project memory bio-baked 2026-04-28).
-- SPEC: `/home/bryan/scrmlMaster/scrmlTS/compiler/SPEC.md` (§11, §12, §13, §39, §52, §53 cited).
+- SPEC: `/home/bryan/scrmlMaster/scrmlTS/compiler/SPEC.md` (§12, §13, §39, §52, §53 cited). <!-- §11 folded into §6.12 + §52 (S194); the protect=/server-annotation content cited here now lives in §52, already listed. -->
 
 **Spec validation summary:**
 
-- ✅ `server fn` syntax current (§11.4 lines 5443-5447, grammar line 15163).
+- ✅ `server fn` syntax current (§52 — `server` annotation under State Authority; §11.4 folded into §52 S194).
 - ✅ Boundary security at compile time: E-PROTECT-001/002, E-ROUTE-002, E-AUTH-001, E-CONTRACT-001 all spec-defined and ship.
 - ✅ Auto-generated fetch + route handler (§12.3, §12.5, §13.2).
 - ✅ Predicate enforcement at server boundary (§53.9.4, verbatim normative).
