@@ -224,10 +224,11 @@ describe("§B8.2c case 2 delete — `delete @derived.foo`", () => {
 // shaped as spec'd: `walkDerivedValueMutate` descends compound `_scope`,
 // `findDeepestRegisteredOnPrefix` walks `["form", "derivedField"]` and
 // matches the deepest registered record, and `record.isConst` discriminates.
-// When parser support for in-compound `const <derived>` lands (B7/parser
-// follow-up), these tests flip from `.skip` to active assertions with no
-// walker change.
-describe.skip("§B8.3 case 3 — in-compound derived sub-cell (parser-deferred)", () => {
+// ss4 item 7 (b) — parser support for in-compound `const <derived>` LANDED
+// (ast-builder.js compound child-loop now dispatches a leading `const` opener
+// into tryParseStructuralDecl with isConst:true; SPEC §6.6.16). These tests are
+// now active assertions with NO walker change.
+describe("§B8.3 case 3 — in-compound derived sub-cell", () => {
   test("fires on method call: `@form.derivedField.push(x)`", () => {
     const src = `<program>\${
       <form>
@@ -346,8 +347,8 @@ describe("§B8.5 computed-index — `@derived[i] = x`", () => {
 // §B8.6 — Compound-receiver method call (multi-segment receiver chain)
 // ===========================================================================
 
-// §B8.6 multi-segment — see §B8.3 rationale for parser deferral.
-describe.skip("§B8.6 multi-segment receiver (parser-deferred — see §B8.3)", () => {
+// §B8.6 multi-segment — parser support landed with ss4 item 7 (b); see §B8.3.
+describe("§B8.6 multi-segment receiver", () => {
   test("fires on multi-segment receiver where leaf is in-compound derived", () => {
     const src = `<program>\${
       <form>
