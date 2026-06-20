@@ -16,12 +16,12 @@ not deliberation, so nothing irreplaceable lives in its transcript; `scrml-suppo
 
 ## Deputy status (RESUME POINT)
 
-- **State:** LIVE — steady-state, RE-HYDRATED instance. **S209 active.** The live PA + cPA are running a **multi-sPA burst**: despace corpus-migration LANDED (`bf390560` Part A + `4e7fa0f0` Part B worked-examples; agent `a087942d` completed→PA-landed) · **sPA ss14** flograph-residuals RE-INTEGRATED (merge `51d7bd5a`) · **sPA ss2** engine-codegen IN FLIGHT (spa/ss2 + 4 dev-agents) · **sPA ss6** just provisioned (spa/ss6). flogence (renamed from flogeance S206). On tick **98**.
+- **State:** LIVE — steady-state, RE-HYDRATED instance. **S209 active; burst settled (main quiescent @ `80f2c190`).** Recently landed: despace corpus-migration (`bf390560`+`4e7fa0f0`) · sPA ss14 flograph-residuals (`51d7bd5a` + reconcile `80f2c190`). **sPA ss2** engine-codegen STILL IN FLIGHT (spa/ss2 + 5 dev-agents). ss6 + ss14 worktrees gone (ss14 PA-cleaned post-land; ss6 untracked — provisioned-then-closed, no land). flogence (renamed from flogeance S206). On tick **99**.
 - **Self-poke loop:** `/loop 30m` → **cron `50e233bd` (`9,39 * * * *`), session-only, armed T96.** (OLD crons `39fed15c`→`e5b76890` both died with their instances — CronList empty at boot, no CronDelete needed. A future re-hydration: CronDelete `50e233bd` if still alive, then re-arm its own.)
-- **Last-absorbed delta seq:** S209 **[22]** (boot absorbed [10]-[18]; T98 absorbed [19] despace Part A landed/B1 dispatched · [20] sPA ss2+ss14 PARALLEL launch [cPA first live test; F3 was PA-carried while deputy dead — now deputy holds it] · [21] cPA MV finding [sPA-launch is dry-run; honest-spawn-limit extends to sPAs] · [22] cPA launch→monitor CORRECTION RATIFIED+LANDED [cPA drops "launch"; user fires sPAs; scope=latency-hide+monitor+landing-PREP]). All informational/contract — NO maintenance-shaped `(vpa:)`.
+- **Last-absorbed delta seq:** S209 **[23]** (T99 absorbed [23] sPA ss14 RE-INTEGRATED [3 code resolved · 3 parked→PA · FILED g-block-analysis-fn-span-overshoot MED · SURFACE→USER: §2.1 deref-policy ruling + flograph provenance-hygiene = the 40-unverified-edges + graph.json drift-gate — a DELIBERATION Q the PA raised to the user, NOT a deputy action]). Prior: boot [10]-[18]; T98 [19]-[22]. All informational/contract — NO maintenance-shaped `(vpa:)`.
 - **`deputy-maint` branch:** worktree `/home/bryan-maclee/scrmlMaster/scrml-deputy-maint` (scrmlMaster sibling, OUTSIDE `.claude/worktrees/`). **Tip:** `git rev-parse deputy-maint` (FF'd to `c734ec35` at boot; +1 with the deputy-state update this tick). FF onto main each tick.
 - **node_modules:** the worktree has the symlinks (verified at boot; re-create if missing): `ln -s …/scrml/node_modules ./node_modules` · `…/scrml/compiler/node_modules ./compiler/node_modules`.
-- **Owed maintenance:** **MAPS (DUE but DEFERRED — multi-sPA burst).** Mapped landings since watermark `9afc746e`: ss1 · ss3 codegen · despace examples + ss14 (flograph/dock/block-analysis scripts — NOT in maps scope) · ss2 engine-codegen IN FLIGHT (emit-engine/engine-graph/symbol-table = mapped). Threshold long-crossed, BUT ss2+ss6 are still producing compiler/src → a refresh now re-runs. DEFER to burst-settle / next wrap-with-src-owed (~100-130k tokens/run). **DIGEST regen'd T98** (delta-log moved [18]→[22] → was STALE; regen'd current @ `51d7bd5a`). §0 + recent-sessions PASS; §3c green.
+- **Owed maintenance:** **MAPS (DUE but DEFERRED — ss2 in flight).** Mapped landings since watermark `9afc746e`: ss1 · ss3 codegen · despace examples. ss2 engine-codegen (emit-engine/engine-graph/symbol-table = mapped) is STILL IN FLIGHT → imminent mapped landing → a refresh now re-runs. main is quiescent NOW but the "AND quiescent" gate means "no imminent mapped landing" too. DEFER to ss2-land / next wrap-with-src-owed (~100-130k tokens/run). **DIGEST regen'd T99** (known-gaps + delta-log moved via reconcile `80f2c190` → was STALE; regen'd current @ `420a79f8`, seq 23). §0 + recent-sessions PASS; §3c green.
 - **Coherence:** the PA INTEGRATED my T97 commits into main (FF'd 256c81b6 into ad6ddddf's history — integration contract working); deputy-maint FF'd clean to `51d7bd5a` 0/0. main moved 3× this tick (ad6ddddf→4e7fa0f0→51d7bd5a ss14-merge); re-synced + re-ran maintenance on the final base. This tick re-advances deputy-maint (digest + deputy-state), awaiting the PA's next integration.
 
 ## The deputy tick (steady-state — what each `/loop` fire does)
@@ -36,7 +36,7 @@ not deliberation, so nothing irreplaceable lives in its transcript; `scrml-suppo
 
 ## PA↔vPA protocol — ACK + HEARTBEAT (S205 [19], each tick)
 
-- **heartbeat:** tick **T98** · last-absorbed **[S209 22]** · deputy-maint = `51d7bd5a` (FF'd; PA integrated my T97 work; main fast-moving — re-FF each tick).
+- **heartbeat:** tick **T99** · last-absorbed **[S209 23]** · deputy-maint @`420a79f8`+ (T98 commit not yet PA-integrated — 1-ahead; main quiescent @`80f2c190`).
 - **ACK (vpa:) [S205 10]** → §3c health-check each tick (standing). **ACK (vpa:) [S205 19]** → ACK+heartbeat each tick (standing). **No new maintenance-shaped `(vpa:)` in [10]–[18]** (all disp/land/rule/state informational). **[11] work-per-token ledger DECLINED-as-not-yet-actionable** (FUTURE deputy responsibility; the work-proxy numerator + token-measurement feasibility are UNRESOLVED + PA/design-owned — not operationalized, so nothing to maintain yet).
 
 ## Standing facts (durable)
@@ -62,7 +62,8 @@ not deliberation, so nothing irreplaceable lives in its transcript; `scrml-suppo
 
 ## Graph/dock health (§3c)
 
-- **Snapshot @ tick 98 (PASS, new ss14 tooling):** flograph 443n/168e · currency-sweep **0** · 40 unverified · 32 dangling · 0 dup · 0 err (re-emitted to clear corpus-moved drift). dock --check PASS — **0 INFO now** (ss14 item-3 verified the flograph.ts self-dock; the standing 1-INFO is gone) · coverage 0/628 · 0 orphans. No NEW finding to route.
+- **Snapshot @ tick 99 (PASS):** flograph 444n/168e (+1 node = new `g-block-analysis-fn-span-overshoot` MED gap) · currency-sweep **0** · 40 unverified · 32 dangling · 0 dup · 0 err (re-emitted). dock --check PASS (0 INFO) · coverage 0/628 · 0 orphans. No NEW finding to route. (NOTE: [23] surfaced flograph provenance-hygiene [40 unverified --with-support edges + graph.json drift-gate] as a USER design Q — tracked, deliberation, not a deputy action.)
+- **Snapshot @ tick 98 (PASS, new ss14 tooling):** flograph 443n/168e · currency-sweep **0** · 40 unverified · 32 dangling · 0 dup · 0 err · dock PASS (0 INFO — ss14 verified the flograph.ts self-dock) · coverage 0/628 · 0 orphans.
 - **Snapshot @ tick 97 (PASS):** unchanged from T96 — flograph 0 dup · currency-sweep **0** · 40 unverified · 32 dangling · 0 err · dock PASS (1 INFO self-dock) · coverage 0/628 · 0 orphans.
 - **Snapshot @ tick 96 (PASS):** flograph 443n/168e (--with-support --with-archive; +4 nodes vs T91 = the new S209 DD docs [cpa-concierge-pa · dock-for-codebase-health] + filed gaps) · currency-sweep **0 (clean)** · 40 unverified · 32 dangling · 0 dup · 0 err. dock --check PASS (1 INFO, self-dock `flograph.ts:391`) · coverage 0/628 (0.0%) · 0 orphans. **Re-emitted graph at T96 to clear the boot drift** (graph.json/mmd stale ERROR — deputy-owned projection; FIX-not-route). No NEW finding to route.
 - **Snapshot @ tick 91 (PASS):** flograph 439n/154e · currency-sweep 0 · 36 unverified · 29 dangling · 0 dup · 0 err. dock PASS · coverage 0/628 · 0 orphans.
@@ -71,16 +72,15 @@ not deliberation, so nothing irreplaceable lives in its transcript; `scrml-suppo
 
 ## In-flight dispatches (F3 watch list)
 
-**T98 watch — PA + cPA ALIVE (actively integrating: 3 main commits this tick) → WATCH ONLY, no `(deputy) state` entries; never land.**
-- **sPA `ss2`** (engine-codegen, picks up g-derived-engine-autoderive-crash) IN FLIGHT — worktree `../scrml-spa-ss2` (spa/ss2 @ff196ce8); orchestrating 4 dev-agents in `.claude/worktrees/` (a1125279 ss2-verify · a58c1007 ss2-item3-baseline · a91d0c9f ss2-4 emit-engine §51.0.I · a93aa91a ss2-2 parser bare-`server` flag, locked). PA re-integrates spa/ss2 on ss2's inbox re-integration message.
-- **sPA `ss6`** just provisioned — worktree `../scrml-spa-ss6` (spa/ss6 @ad6ddddf, no work yet).
-- **LANDED this tick (off watch):** sPA ss14 (flograph-residuals) merged → `51d7bd5a` (worktree `../scrml-spa-ss14` still present → PA 6b-cleanup pending, not a deputy act). despace agent `a087942d` completed → PA S67-landed (Part B `4e7fa0f0`).
+**T99 watch — PA + cPA ALIVE (main quiescent @`80f2c190`; PA managing ss2) → WATCH ONLY, no `(deputy) state` entries; never land.**
+- **sPA `ss2`** (engine-codegen, picks up g-derived-engine-autoderive-crash) STILL IN FLIGHT — worktree `../scrml-spa-ss2` (spa/ss2 @ff196ce8); orchestrating 5 dev-agents in `.claude/worktrees/` (a1125279 verify-gate · a53930ca B17 deferred-case survey [NEW] · a58c1007 item3-baseline · a91d0c9f §51.0.I emit-engine · a93aa91a ss2-2 bare-`server` parser). PA re-integrates spa/ss2 on ss2's inbox re-integration message.
+- **OFF watch:** sPA ss14 landed `51d7bd5a` + reconcile `80f2c190` → worktree PA-6b-cleaned. sPA ss6 worktree gone (provisioned-then-closed, no land — no deputy action). despace `a087942d` landed `4e7fa0f0`.
 - F3 reminder: record a `(deputy) state` entry ONLY if an sPA COMPLETES CLEANLY *while the PA is absent/rebooting*. A WIP/partial worktree is NOT a completion.
 - (Prior S205-S209 agents landed + cleaned: ss1 `37a9a8c9` [7], ss3 `f9ccd275` [14], ss11 `b2a63c70` [16].)
 
-## Currency snapshot (@ tick 98)
+## Currency snapshot (@ tick 99)
 
-- **maps:** watermark `9afc746e` (50 commits behind HEAD `51d7bd5a`) — **OWED + DUE but DEFERRED** through the multi-sPA burst (ss2+ss6 still producing compiler/src). **digest:** current (regen'd T98 @ `51d7bd5a`, delta-seq 22). **§0:** gap-counts + recent-sessions PASS. **§3c:** PASS (443n/168e, new ss14 tooling). board **HIGH 0 · MED 12 · LOW 19 · Nom 8** (ground-truth oracle @ HEAD).
+- **maps:** watermark `9afc746e` (52 commits behind HEAD `420a79f8`) — **OWED + DUE but DEFERRED** (ss2 engine-codegen still in flight → imminent mapped landing). **digest:** current (regen'd T99 @ `420a79f8`, delta-seq 23). **§0:** gap-counts + recent-sessions PASS. **§3c:** PASS (444n/168e). board **HIGH 0 · MED 12 · LOW 18 · Nom 8** (ground-truth oracle @ HEAD).
 
 ## Maintenance seams (Function 2)
 
