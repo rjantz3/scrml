@@ -1,12 +1,13 @@
 {
   "_meta": {
-    "generated": "2026-06-20T15:19:20.219Z",
+    "generated": "2026-06-20T15:50:38.030Z",
     "apps": 434,
     "cells": 438,
     "histogram": {
       "renders-empty": 20,
-      "compiles-but-throws": 31,
+      "needs-server": 9,
       "renders-clean": 259,
+      "compiles-but-throws": 22,
       "fails-compile": 126,
       "smell-detected-wrong": 1,
       "HARNESS-TIMEOUT": 1
@@ -24,14 +25,11 @@
     },
     "benchmarks/per-route-roles/routes/loads.scrml#empty": {
       "tier": "perf",
-      "state": "compiles-but-throws",
+      "state": "needs-server",
       "smells": [
-        "D1-MOUNT-THROW"
+        "NEEDS-SERVER"
       ],
-      "seeded": false,
-      "detail": {
-        "throwMessage": "{} is not iterable"
-      }
+      "seeded": false
     },
     "benchmarks/todomvc/app.scrml#empty": {
       "tier": "perf",
@@ -155,14 +153,11 @@
     },
     "examples/17-schema-migrations.scrml#empty": {
       "tier": "flagship",
-      "state": "compiles-but-throws",
+      "state": "needs-server",
       "smells": [
-        "D1-MOUNT-THROW"
+        "NEEDS-SERVER"
       ],
-      "seeded": false,
-      "detail": {
-        "throwMessage": "{} is not iterable"
-      }
+      "seeded": false
     },
     "examples/18-state-authority.scrml#empty": {
       "tier": "flagship",
@@ -201,14 +196,11 @@
     },
     "examples/23-trucking-dispatch/app.scrml#empty": {
       "tier": "flagship",
-      "state": "compiles-but-throws",
+      "state": "needs-server",
       "smells": [
-        "D1-MOUNT-THROW"
+        "NEEDS-SERVER"
       ],
-      "seeded": false,
-      "detail": {
-        "throwMessage": "Cannot destructure property 'createSessionStore' from null or undefined value"
-      }
+      "seeded": false
     },
     "examples/24-tilde-pipeline.scrml#empty": {
       "tier": "flagship",
@@ -1903,17 +1895,12 @@
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arith-in-sql-interp-048.scrml#empty": {
       "tier": "probe",
-      "state": "compiles-but-throws",
+      "state": "needs-server",
       "smells": [
-        "D2-CONSOLE-ERROR"
+        "D2-CONSOLE-ERROR",
+        "NEEDS-SERVER"
       ],
-      "seeded": false,
-      "detail": {
-        "consoleErrors": [
-          "undefined is not an object (evaluating 'rows.length')",
-          "[window.onerror] undefined is not an object (evaluating 'rows.length')"
-        ]
-      }
+      "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-arith-minus-042.scrml#empty": {
       "tier": "probe",
@@ -2379,17 +2366,12 @@
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-not-in-sql-098.scrml#empty": {
       "tier": "probe",
-      "state": "compiles-but-throws",
+      "state": "needs-server",
       "smells": [
-        "D2-CONSOLE-ERROR"
+        "D2-CONSOLE-ERROR",
+        "NEEDS-SERVER"
       ],
-      "seeded": false,
-      "detail": {
-        "consoleErrors": [
-          "undefined is not an object (evaluating 'rows.length')",
-          "[window.onerror] undefined is not an object (evaluating 'rows.length')"
-        ]
-      }
+      "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-not-method-call-paren-010.scrml#empty": {
       "tier": "probe",
@@ -2579,17 +2561,12 @@
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-method-call-sql-088.scrml#empty": {
       "tier": "probe",
-      "state": "compiles-but-throws",
+      "state": "needs-server",
       "smells": [
-        "D2-CONSOLE-ERROR"
+        "D2-CONSOLE-ERROR",
+        "NEEDS-SERVER"
       ],
-      "seeded": false,
-      "detail": {
-        "consoleErrors": [
-          "null is not an object (evaluating 'rows.length')",
-          "[window.onerror] null is not an object (evaluating 'rows.length')"
-        ]
-      }
+      "seeded": false
     },
     "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-neq-numeric-016.scrml#empty": {
       "tier": "probe",
@@ -3557,31 +3534,21 @@
     },
     "samples/compilation-tests/gauntlet-s20-sql/server-var-001.scrml#empty": {
       "tier": "probe",
-      "state": "compiles-but-throws",
+      "state": "needs-server",
       "smells": [
-        "D2-CONSOLE-ERROR"
+        "D2-CONSOLE-ERROR",
+        "NEEDS-SERVER"
       ],
-      "seeded": false,
-      "detail": {
-        "consoleErrors": [
-          "undefined is not an object (evaluating '_scrml_reactive_get(\"userCount\").count')",
-          "[window.onerror] undefined is not an object (evaluating '_scrml_reactive_get(\"userCount\").count')"
-        ]
-      }
+      "seeded": false
     },
     "samples/compilation-tests/gauntlet-s20-sql/server-var-multiple-001.scrml#empty": {
       "tier": "probe",
-      "state": "compiles-but-throws",
+      "state": "needs-server",
       "smells": [
-        "D2-CONSOLE-ERROR"
+        "D2-CONSOLE-ERROR",
+        "NEEDS-SERVER"
       ],
-      "seeded": false,
-      "detail": {
-        "consoleErrors": [
-          "undefined is not an object (evaluating '_scrml_reactive_get(\"userCount\").count')",
-          "[window.onerror] undefined is not an object (evaluating '_scrml_reactive_get(\"userCount\").count')"
-        ]
-      }
+      "seeded": false
     },
     "samples/compilation-tests/gauntlet-s20-styles/css-flat-and-scoped-001.scrml#empty": {
       "tier": "probe",
@@ -3773,7 +3740,7 @@
           "E-IMPORT-006"
         ],
         "compileErrorMessages": [
-          "E-IMPORT-006: Cannot resolve import `./helpers/dnd-setup.scrml` — no file found at `/tmp/scrml-e2e-render-map/case-mqmi63wp-kokgjnfo/helpers/dnd-setup.scrml`. Check the path and file name. Relative imports are resolved against the importing file's directory."
+          "E-IMPORT-006: Cannot resolve import `./helpers/dnd-setup.scrml` — no file found at `/tmp/scrml-e2e-render-map/case-mqmjaem2-orxb9jjl/helpers/dnd-setup.scrml`. Check the path and file name. Relative imports are resolved against the importing file's directory."
         ]
       }
     },
@@ -3797,14 +3764,11 @@
     },
     "samples/compilation-tests/protect-001-basic-auth.scrml#empty": {
       "tier": "probe",
-      "state": "compiles-but-throws",
+      "state": "needs-server",
       "smells": [
-        "D1-MOUNT-THROW"
+        "NEEDS-SERVER"
       ],
-      "seeded": false,
-      "detail": {
-        "throwMessage": "Cannot destructure property 'navigate' from null or undefined value"
-      }
+      "seeded": false
     },
     "samples/compilation-tests/schemaFor-basic.scrml#empty": {
       "tier": "probe",
@@ -4026,7 +3990,7 @@
           "E-CPS-NONIDEM-NO-STORAGE"
         ],
         "compileErrorMessages": [
-          "E-PA-002: Database file `/tmp/scrml-e2e-render-map/case-mqmi6b6g-0ivf1ghm/api.db` does not exist and no CREATE TABLE statement was found in any `?{}` block for table `entries`. Either create the database file first, or add a CREATE TABLE statement in a `?{}` block so the compiler can validate the schema at compile time.",
+          "E-PA-002: Database file `/tmp/scrml-e2e-render-map/case-mqmjaktv-urm686jb/api.db` does not exist and no CREATE TABLE statement was found in any `?{}` block for table `entries`. Either create the database file first, or add a CREATE TABLE statement in a `?{}` block so the compiler can validate the schema at compile time.",
           "E-CPS-NONIDEM-NO-STORAGE: CPS-eligible function `updateEntry` has a non-monotone server batch (per SPEC §19.9.6 classifier), but no idempotency-key storage backend is configured. Resolution: declare `<program idempotency-store=>` matching the `db=` driver, import `scrml:redis`, or annotate the function with `.idempotent()` (§19.9.7) if the batch is monotone-by-construction."
         ]
       }

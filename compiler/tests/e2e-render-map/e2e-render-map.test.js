@@ -40,7 +40,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const BASELINE_PATH = join(__dirname, "e2e-render-map-baseline.json");
 
-const GREEN_STATES = new Set(["renders-clean", "renders-empty"]);
+// `needs-server` is non-gap (server-dependent app, no server at mount — S203 b+c).
+const GREEN_STATES = new Set(["renders-clean", "renders-empty", "needs-server"]);
 
 // The fast in-process slice: examples + benchmarks (no samples — samples incl.
 // the meta-heavy hangers belong to the subprocess-isolated standing run).
