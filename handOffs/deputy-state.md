@@ -37,7 +37,7 @@ not deliberation, so nothing irreplaceable lives in its transcript; `scrml-suppo
 
 ## PA↔vPA protocol — ACK + HEARTBEAT (S205 [19], each tick)
 
-- **heartbeat:** tick **T105** · last-absorbed **[S209 26]** · deputy-maint @`85d9e958`+ (PA integrated my T101/T102; this tick re-advances with the [25-26] digest regen). main `85d9e958` (moved 3× this tick: b67cd6e6→6170ee8c→85d9e958; T103/T104 were quiescent no-ops, no commit).
+- **heartbeat:** tick **T106** · last-absorbed **[S209 26]** (no new entries — main quiescent @`85d9e958`) · deputy-maint @`f57ceeeb`+ (this tick: §3c drift-fix re-emit [local] + Lessons entry). F3 watch list EMPTY.
 - **ACK (vpa:) [S205 10]** → §3c health-check each tick (standing). **ACK (vpa:) [S205 19]** → ACK+heartbeat each tick (standing). **No new maintenance-shaped `(vpa:)` in [10]–[18]** (all disp/land/rule/state informational). **[11] work-per-token ledger DECLINED-as-not-yet-actionable** (FUTURE deputy responsibility; the work-proxy numerator + token-measurement feasibility are UNRESOLVED + PA/design-owned — not operationalized, so nothing to maintain yet).
 
 ## Standing facts (durable)
@@ -60,10 +60,12 @@ not deliberation, so nothing irreplaceable lives in its transcript; `scrml-suppo
 - **perl -e:** NO apostrophes in replacement text (a single-quote terminates the `perl -e '...'` string — T52); use `{}` delimiters; escape `/`; heredoc-rewrite is the reliable fallback. **delta-log edits:** use python (backticks break the shell).
 - **CWD slip:** Bash CWD resets to MAIN after each command — `cd` the worktree (or `git -C`) before worktree ops. **Untracked new file:** `git add` before commit. `docs/graph/` is gitignored.
 - **Commit gate:** pre-commit WARNS on non-main + runs the ~17k subset (~75-120s); deputy commits are derived-only → always pass; never `--no-verify`. `git rebase` does NOT run the gate.
+- **§3c AFTER the final FF, not before (T106):** if a tick does its §3c check at an intermediate base and THEN FFs in a PA gap-reconcile / known-gaps change, the graph drifts (graph.json built from @gap/@node tokens) but the pre-FF check missed it → surfaces as a flograph `--check` ERROR the NEXT tick. Re-run §3c (or at least re-emit) AFTER the final sync. The per-tick check is the safety net (caught T105's missed drift at T106), but check-after-FF avoids the 1-tick lag. (T105 ran §3c at b2668ae7 then FF'd to 85d9e958 w/ the reconcile.)
 
 ## Graph/dock health (§3c)
 
-- **Snapshot @ tick 105 (PASS):** flograph 445n/168e · currency-sweep 0 · 32 dangling · 40 unverified · 0 dup · 0 err (no drift — ss5/ss6 reconcile didn't change graph topology; no re-emit) · dock PASS · coverage 0/628. No new finding. (T103/T104 quiescent no-ops, not recorded.)
+- **Snapshot @ tick 106 (PASS, drift caught+fixed):** flograph --check showed 2 ERRORs = graph.json/mmd drift from T105's gap-reconcile FF (g-export-channel-body-text status change) — FIXED by re-emit (445n/168e, gitignored/local, not committable). currency-sweep 0 · 32 dangling · 40 unverified · 0 dup · 0 err post-fix. dock PASS · coverage 0/628. No new finding to route. (See Lessons: §3c-after-final-FF.)
+- **Snapshot @ tick 105 (PASS):** flograph 445n/168e · currency-sweep 0 · 32 dangling · 40 unverified · 0 dup (graph was checked pre-FF → missed the reconcile drift, caught T106) · dock PASS · coverage 0/628.
 - **Snapshot @ tick 101 (PASS):** flograph 445n/168e (+1 = ss2 reconcile) · currency-sweep 0 · 32 dangling · 40 unverified · 0 dup · 0 err (re-emitted) · dock PASS (0 INFO) · coverage 0/628.
 - **Snapshot @ tick 100 (PASS, unchanged):** flograph 444n/168e · currency-sweep 0 · 32 dangling · 40 unverified · 0 dup · 0 err · dock PASS · coverage 0/628.
 - **Snapshot @ tick 99 (PASS):** flograph 444n/168e (+1 node = new `g-block-analysis-fn-span-overshoot` MED gap) · currency-sweep **0** · 40 unverified · 32 dangling · 0 dup · 0 err (re-emitted). dock --check PASS (0 INFO) · coverage 0/628 · 0 orphans. No NEW finding to route. (NOTE: [23] surfaced flograph provenance-hygiene [40 unverified --with-support edges + graph.json drift-gate] as a USER design Q — tracked, deliberation, not a deputy action.)
