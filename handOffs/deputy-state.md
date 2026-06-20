@@ -5,23 +5,24 @@ off THIS file + the delta-log + the maintenance read-list (cheap + lossless: the
 not deliberation, so nothing irreplaceable lives in its transcript; `scrml-support/vpa-scrml.md`
 §"Re-hydration"). **Deputy-owned** (write-surface partition); maintained on the `deputy-maint` branch.
 
-> **RE-HYDRATED at tick 89 (S209).** This instance IS the reboot the tick-86 anchor prepared for: a fresh
-> deputy booted via "read vpa.md and boot", FF'd the existing `deputy-maint` worktree (already current —
-> main idle @72dc4fdb), confirmed last-absorbed S209 [6], ran a boot tick (oracle + §3c + F3), re-armed its
-> own `/loop 30m` (the old cron `39fed15c` died with the prior instance — CronList empty, as predicted).
-> A future fresh deputy repeats this off the resume point below.
+> **RE-HYDRATED at tick 96 (S209) — fresh deputy after the tick-95 death.** The prior deputy DIED at tick 95
+> (delta-log [18]: the session-only cron `e5b76890` died with the crashed PA instance; the PA reset
+> `deputy-maint`→main + PA-drove the digest regen). This instance booted via "read vpa.md and boot", confirmed
+> the delta-log WINS over the stale tick-91 anchor (absorbed [10]–[18]), FF'd `deputy-maint` onto current main,
+> ran a boot tick (oracle + §3c + F3), and re-armed its own `/loop 30m` (CronList empty at boot, as predicted —
+> NEW cron `50e233bd`). A future fresh deputy repeats this off the resume point below.
 
 ---
 
 ## Deputy status (RESUME POINT)
 
-- **State:** LIVE — steady-state, RE-HYDRATED instance. **S209 active** (sPA ss1 FIRST LIVE RUN landed [7]; dock-health surfaces ratified). flogence (renamed from flogeance S206). On tick **91**.
-- **Self-poke loop:** `/loop 30m` → **cron `e5b76890` (`7,37 * * * *`), session-only, armed T89.** (OLD cron `39fed15c` died with the prior instance — CronList empty at boot, no CronDelete needed. A future re-hydration: CronDelete `e5b76890` if still alive, then re-arm its own.)
-- **Last-absorbed delta seq:** S209 **[9]** ([7] ss1 re-integrated · [8] ss1 batch pushed · [9] sPA AUTONOMY CORRECTION → spa-scrml.md §Standing-autonomy + §close-without-wrap [next-sPA-boot, NOT running ss11]). All informational/contract — no `(vpa:)`, no deputy action. (Deputy appended the S205 F3 entry [22].)
-- **`deputy-maint` branch:** worktree `/home/bryan-maclee/scrmlMaster/scrml-deputy-maint` (scrmlMaster sibling, OUTSIDE `.claude/worktrees/`). **Tip:** `git rev-parse deputy-maint`. FF onto main at boot.
-- **node_modules:** the worktree already has the symlinks (re-create if missing): `ln -s …/scrml/node_modules ./node_modules` · `…/scrml/compiler/node_modules ./compiler/node_modules`.
-- **Owed maintenance:** **MAPS (batching).** ss1 landed `emit-server.ts` + `var-counter.ts` (compiler/src = mapped) — FIRST mapped landing since watermark `9afc746e`. 1 landing → BATCH per the cadence rule (not wrap · not ≥2 landings · not ≥10 ticks owed). Refresh on the 2nd mapped landing (ss11 may land more) OR at the next wrap-with-src-owed. (digest REGEN'd current stamp=df62b44f delta-seq 7; §0 + recent-sessions PASS [PA regen'd at gap-reconcile]; §3c green.)
-- **Coherence:** the PA integrated my T89 commits at the ss1 re-integration (deputy-maint FF'd 0/0 with main @df62b44f); this T91 tick re-advances deputy-maint (digest + deputy-state) awaiting the PA's next integration — clean FF.
+- **State:** LIVE — steady-state, RE-HYDRATED instance. **S209 active.** The live PA is mid **§4 despace amendment + corpus migration** (delta-log [16]-escalated PA-track work — `bf390560` Part A prose + `c734ec35` Part B examples; agent `a087942d` in-flight continuing it). flogence (renamed from flogeance S206). On tick **96**.
+- **Self-poke loop:** `/loop 30m` → **cron `50e233bd` (`9,39 * * * *`), session-only, armed T96.** (OLD crons `39fed15c`→`e5b76890` both died with their instances — CronList empty at boot, no CronDelete needed. A future re-hydration: CronDelete `50e233bd` if still alive, then re-arm its own.)
+- **Last-absorbed delta seq:** S209 **[18]** ([10] cPA DD disp · [11] work-per-token tracking directive [FUTURE deputy ledger, NOT yet operationalized — see Standing facts] · [12] cPA DD land · [13] cPA MV built · [14] sPA ss3 autonomous run re-integrated +3 MED filed · [15] crash-recovery reconcile · [16] sPA ss11 re-integrated [doc-currency 1-3; despace ESCALATED to PA-track] · [17] giti-006 re-sent · [18] DEPUTY DIED tick-95 + deputy-maint reset). All informational/contract — NO maintenance-shaped `(vpa:)`, no deputy action owed beyond this re-hydration.
+- **`deputy-maint` branch:** worktree `/home/bryan-maclee/scrmlMaster/scrml-deputy-maint` (scrmlMaster sibling, OUTSIDE `.claude/worktrees/`). **Tip:** `git rev-parse deputy-maint` (FF'd to `c734ec35` at boot; +1 with the deputy-state update this tick). FF onto main each tick.
+- **node_modules:** the worktree has the symlinks (verified at boot; re-create if missing): `ln -s …/scrml/node_modules ./node_modules` · `…/scrml/compiler/node_modules ./compiler/node_modules`.
+- **Owed maintenance:** **MAPS (DUE but DEFERRED — live PA burst).** ≥2 mapped landings since watermark `9afc746e`: ss1 `emit-server.ts`+`var-counter.ts` · ss3 codegen (g-bare-literal-attr-value etc.) · `c734ec35` `hos.scrml` (example .scrml). Threshold crossed → refresh IS due, BUT the PA is mid-despace-corpus-migration (more examples/samples .scrml imminent via agent `a087942d`) → refresh would re-run; DEFER to burst-settle / next wrap-with-src-owed (token economy — a refresh is ~100-130k sub-agent tokens). (digest **current** stamp `20eb6e39`; §0 + recent-sessions PASS; §3c green.)
+- **Coherence:** deputy-maint FF'd to `c734ec35` (0/0 with main at boot); this tick re-advances deputy-maint with the deputy-state update awaiting the PA's next integration — clean FF by construction.
 
 ## The deputy tick (steady-state — what each `/loop` fire does)
 
@@ -35,44 +36,45 @@ not deliberation, so nothing irreplaceable lives in its transcript; `scrml-suppo
 
 ## PA↔vPA protocol — ACK + HEARTBEAT (S205 [19], each tick)
 
-- **heartbeat:** tick **T91** · last-absorbed **[S209 9]** · deputy-maint tip = `git rev-parse deputy-maint`. (main moved 2× mid-tick: df62b44f→a99246e2; rebased deputy-maint, re-absorbed.)
-- **ACK (vpa:) [S205 10]** → §3c health-check each tick (standing). **ACK (vpa:) [S205 19]** → ACK+heartbeat each tick (standing). No new `(vpa:)` in S206-S209 (S209 [7] is informational `disp/land`).
+- **heartbeat:** tick **T96** · last-absorbed **[S209 18]** · deputy-maint tip = `git rev-parse deputy-maint` (FF'd to `c734ec35`; main advancing live — re-FF each tick).
+- **ACK (vpa:) [S205 10]** → §3c health-check each tick (standing). **ACK (vpa:) [S205 19]** → ACK+heartbeat each tick (standing). **No new maintenance-shaped `(vpa:)` in [10]–[18]** (all disp/land/rule/state informational). **[11] work-per-token ledger DECLINED-as-not-yet-actionable** (FUTURE deputy responsibility; the work-proxy numerator + token-measurement feasibility are UNRESOLVED + PA/design-owned — not operationalized, so nothing to maintain yet).
 
 ## Standing facts (durable)
 
-- **Merge-before-push gate (S205 [15], pa.md S199 + wrap step 7):** the PA asserts `deputy-maint ^main == 0` before any push — integrates the deputy each cycle. Working.
+- **Merge-before-push gate (S205 [15], pa.md S199 + wrap step 7):** the PA asserts `deputy-maint ^main == 0` before any push — integrates the deputy each cycle. Working (the [18] reset + the [8] 5-tick merge are recent instances).
 - **F1 dilation REALIZED:** F1 ~8.3k start-thinning when the digest boots current; total deputy dilation ~14-15k/cycle ≈ 1.5%/1M (NOT the design-time 7-10% — frame-conflation corrected S204/S205). Net-positive. S209 cold-boot was digest-thinned ([S209 1]); S208 was NOT (PA misread the deputy as down → skipped the boot-merge → stale digest → read the heartbeat to know the deputy is alive).
+- **work-per-token ledger (S209 [11], FUTURE deputy responsibility — NOT yet live):** user directive — once the PA has wrap-timing autonomy, track wrap + session-start context draws + optimize for WORK-DONE-PER-TOKEN (wrap+start EXCLUDED from "work"). "deputy maintains the ledger." BLOCKED on the PA/design-track resolving the work-PROXY (numerator) + token-measurement feasibility (no clean token API; byte/4 + harness-% estimates; needs a hook or wrap-time capture). S209 = datapoint #1 (PA-captured at the wrap, estimate-flagged). The deputy operationalizes this ONLY after the measurement mechanism is ratified — until then, nothing to maintain.
 - **S42 WRAP-THINNING (S205 [19]):** PA wraps reference digest/delta-log/deputy-state for mechanical content (deputy-enabled).
-- **Block-analysis-emit v1 arc COMPLETE (S206-S208):** D1 footprint + D2 builder + D3 emit-wiring + D4 dock-consumer + D5 span-fix; block-lease groundwork. dock-health.ts (codebase-health surface) built S209.
+- **cPA (Concierge PA) role + MV BUILT (S209 [10]-[13]):** role DD landed (scrml-support `4edafc2`); MV contract `cpa-scrml.md` + pointer `cpa.md` + templates `handOffs/cpa-{roster,queue,state}.md`. Haiku, N=1, stow-and-feed + launch/monitor-sPA. NOT a deputy surface (distinct role); noted for re-hydration awareness only.
+- **Block-analysis-emit v1 arc COMPLETE (S206-S208):** D1 footprint + D2 builder + D3 emit-wiring + D4 dock-consumer + D5 span-fix; block-lease groundwork. dock-health.ts (codebase-health surface) built S209 ([4]).
 
 ## Lessons (operational — avoid re-learning)
 
 - **Maps mechanism (T12, user-ruled no-consent):** dispatch `project-mapper` INTO the deputy-maint worktree (CWD-pinned, worktree-only-path brief, NO isolation) + independently verify `git -C <main> status --porcelain -- .claude/maps/` is EMPTY before committing. project-mapper > manual (it catches new E-/W-codes a manual edit misses — T76/T82).
-- **Maps refresh RULE (firm):** refresh when — a WRAP boundary with any compiler-src owed · OR ≥2 changes accumulate · OR an owed change has sat ≥10 ticks. Else BATCH (each run ~100-130k sub-agent tokens; PA-window saving only ~6-7k → minimize runs).
-- **maps-owed scope:** `examples/**/*.scrml` + `samples/**/*.scrml` — NOT bare `**/*.scrml` (catches docs/changes/ fixtures = false signal, T37).
-- **Digest:** regen ONLY when a projected source (known-gaps/delta-log/maps/version) moved; regen the tick AFTER a bundled maps+digest commit (the stamp lags its own commit otherwise — T51/T77).
+- **Maps refresh RULE (firm):** refresh when — a WRAP boundary with any compiler-src/example-.scrml owed · OR ≥2 mapped changes accumulate AND main is quiescent · OR an owed change has sat ≥10 ticks. Else BATCH (each run ~100-130k sub-agent tokens; PA-window saving only ~6-7k → minimize runs; NEVER fire mid live-PA-burst — the moving main + imminent more-src make it re-run).
+- **maps-owed scope:** `examples/**/*.scrml` + `samples/**/*.scrml` + `compiler/src/**` — NOT bare `**/*.scrml` (catches docs/changes/ fixtures = false signal, T37).
+- **Digest:** regen ONLY when a projected source (known-gaps/delta-log/maps/version) moved; regen the tick AFTER a bundled maps+digest commit (the stamp lags its own commit otherwise — T51/T77). SPEC/test/example-.scrml landings do NOT stale the digest.
 - **Partition-breach (T44):** a cross-cutting text-rename touches deputy-owned files → rebase conflict. Resolve by reset deputy-maint to the renamed main + rebuild (deputy commits are regenerable — no info loss).
-- **PA fast-burst:** the PA may skip §0/maps and may not delta-log a burst → deputy regens §0 + git-infers agent/landing state (T54/T76).
+- **PA fast-burst:** the PA may skip §0/maps and may not delta-log a burst → deputy regens §0 + git-infers agent/landing state (T54/T76). **Observed at T96: PA advanced main 2 commits + dispatched agent `a087942d` mid-deputy-boot with no delta entry yet — git-state is ground truth, not the delta-log tail.**
 - **perl -e:** NO apostrophes in replacement text (a single-quote terminates the `perl -e '...'` string — T52); use `{}` delimiters; escape `/`; heredoc-rewrite is the reliable fallback. **delta-log edits:** use python (backticks break the shell).
 - **CWD slip:** Bash CWD resets to MAIN after each command — `cd` the worktree (or `git -C`) before worktree ops. **Untracked new file:** `git add` before commit. `docs/graph/` is gitignored.
 - **Commit gate:** pre-commit WARNS on non-main + runs the ~17k subset (~75-120s); deputy commits are derived-only → always pass; never `--no-verify`. `git rebase` does NOT run the gate.
 
 ## Graph/dock health (§3c)
 
-- **Snapshot @ tick 91 (PASS):** flograph 439n/154e (--with-support --with-archive; +1 node = the newly-filed `g-const-only-module-no-server-emit` gap) · currency-sweep **0 (clean)** · 36 unverified · 29 dangling · 0 dup · 0 err. dock --check PASS (1 INFO, self-dock) · coverage 0/628 (0.0%) · 0 orphans. **Re-emitted graph at T91 to clear a known-gaps-change drift** (deputy-owned projection). No NEW finding to route.
+- **Snapshot @ tick 96 (PASS):** flograph 443n/168e (--with-support --with-archive; +4 nodes vs T91 = the new S209 DD docs [cpa-concierge-pa · dock-for-codebase-health] + filed gaps) · currency-sweep **0 (clean)** · 40 unverified · 32 dangling · 0 dup · 0 err. dock --check PASS (1 INFO, self-dock `flograph.ts:391`) · coverage 0/628 (0.0%) · 0 orphans. **Re-emitted graph at T96 to clear the boot drift** (graph.json/mmd stale ERROR — deputy-owned projection; FIX-not-route). No NEW finding to route.
+- **Snapshot @ tick 91 (PASS):** flograph 439n/154e · currency-sweep 0 · 36 unverified · 29 dangling · 0 dup · 0 err. dock PASS · coverage 0/628 · 0 orphans.
 - **Snapshot @ tick 89 (PASS):** flograph 438n/154e · currency-sweep 0 · 36 unverified · 29 dangling · 0 dup · 0 err. dock PASS · coverage 0/628 · 0 orphans.
-- **Snapshot @ tick 86 (PASS):** flograph ~428n/103e · currency-sweep 0 · ~30 unverified · ~29 dangling · 0 dup · 0 err. dock PASS · coverage 0/628 · 0 orphans.
-- **route to PA (open nit):** §3 plain `flograph --emit` vs §3c `--check --with-support --with-archive` → graph.json drifts to the 190n default; the deputy compensates by emitting with the matching flags. Align §3 with §3c (or make --check corpus-aware).
+- **route to PA (open nit, standing):** §3 plain `flograph --emit` vs §3c `--check --with-support --with-archive` → graph.json drifts to the 190n default; the deputy compensates by emitting with the matching flags (`--emit --with-support --with-archive`). Align §3 with §3c (or make --check corpus-aware).
 
 ## In-flight dispatches (F3 watch list)
 
-- **ss11 `../scrml-spa-ss11` IN-FLIGHT (T91 watch):** the parallel-safe pair (disjoint docs surface). Tip `e8b3b8ac` fix(ss11): r28-c2 kickstarter despace `< db>`→`<db>`; `cab3e8a3` item 3 PARK+escalate (SPEC self-contradiction on canonical opener). NO re-integration msg to the PA yet (per [7]) → still running; PA-tracked. Watch+record only; never land.
-- **ss1 `a6eb2c2fd9ba6086b` LANDED + RESOLVED (T91, by the PA — no deputy action needed):** the PA FF-merged spa/ss1 → main `37a9a8c9` and gap-reconciled (item 1 `g-route-mis-inference` resolved via `795704c1`; filed sibling `g-const-only-module-no-server-emit`). Recorded in delta-log [7] (PA-source, NOT a deputy reboot-gap entry — PA was alive). Worktree `agent-a6eb2c2fd9ba6086b` still present → PA 6b-cleanup (not a deputy act).
-- (All prior S205-S208 agents landed + cleaned; g-pure-module crash→S208-salvage loop closed.)
+- **agent `a087942d525452e0e` IN-FLIGHT (T96 watch):** PA-dispatched mid-deputy-boot; worktree `.claude/worktrees/agent-a087942d525452e0e` (locked, base `c734ec35`). Almost certainly continuing the §4 despace corpus-migration (Part B+ examples/samples). **PA is ALIVE** (it advanced main + dispatched) → F3 = WATCH ONLY, no `(deputy) state` entry (F3 records completions only when the PA is absent/rebooting). Never land.
+- (All prior S205-S209 agents landed + cleaned: ss1 `37a9a8c9` [7], ss3 `f9ccd275` [14], ss11 `b2a63c70` [16] — all PA-merged + 6b-cleaned. g-pure-module crash→S208-salvage loop closed.)
 
-## Currency snapshot (@ tick 91)
+## Currency snapshot (@ tick 96)
 
-- **maps:** watermark `9afc746e` — **OWED (batching):** ss1's `emit-server.ts`+`var-counter.ts` (compiler/src) is the first mapped change since the watermark; refresh on the 2nd mapped landing or at wrap. **digest:** current (stamp `df62b44f`, delta-seq 7 — REGEN'd T91). **§0:** gap-counts + recent-sessions PASS (PA regen'd). **§3c:** PASS (439n/154e). board MED 9 net (g-route-mis-inference −1, g-const-only-module +1).
+- **maps:** watermark `9afc746e` — **OWED + DUE but DEFERRED** (≥2 mapped landings: ss1 + ss3 + `c734ec35` hos.scrml; refresh deferred through the live despace-migration burst → burst-settle or next wrap-with-src-owed). **digest:** current (stamp `20eb6e39`; despace SPEC/test/example landings are non-projected-sources → not staled). **§0:** gap-counts + recent-sessions PASS. **§3c:** PASS (443n/168e). board **HIGH 0 · MED 12 · LOW 19 · Nom 8** (ground-truth oracle @ HEAD; S209 sPA work shifted from the digest's MED9/LOW23 — ss3 +3 MED, etc.).
 
 ## Maintenance seams (Function 2)
 
