@@ -1,20 +1,18 @@
 // CONF-045 | §4.9
-// The compiler SHOULD emit a warning (W-MACRO-001) when a macro expansion alters
-// the block type at a `<` boundary. This warning is informational; it does not
-// prevent compilation.
+// W-MACRO-001 was RETIRED 2026-06-19 (S209 — state-as-primary unification follow-through).
+// Under Name Resolution (§15.15.6), whitespace after `<` never reclassifies an opener
+// (Phase P1, 2026-04-30), so a macro expansion cannot alter block type at a `<` boundary —
+// the W-MACRO-001 trigger is impossible. A macro-inserted leading whitespace instead produces
+// the deprecated opener form and surfaces W-WHITESPACE-001 (§15.15.5); classification
+// (state vs HTML) is by the identifier, not by whitespace.
 //
-// STATUS: Stub — W-MACRO-001 requires the preprocessor pass and a diagnostics
-// system that can compare pre-expansion vs post-expansion block types at `<`
-// boundaries. Neither is implemented yet.
+// STATUS: Retired. The preprocessor/macro pass was never implemented and W-MACRO-001 is
+// removed from the §34 catalog. The observable whitespace-opener behavior (a `< db>` opener
+// emits W-WHITESPACE-001 and still classifies by NR) is covered by the W-WHITESPACE-001 tests.
 import { describe, test, expect } from "bun:test";
 
-describe("CONF-045 (stub): W-MACRO-001 warning on macro-induced block type change (later pass)", () => {
-  test("placeholder — cannot test W-MACRO-001 until preprocessor and diagnostics are implemented", () => {
+describe("CONF-045 (retired): W-MACRO-001 — macro-induced block-type change is impossible under NameRes", () => {
+  test("retired — whitespace after `<` never reclassifies an opener (NR §15.15.6); macro whitespace surfaces W-WHITESPACE-001, not W-MACRO-001", () => {
     expect(true).toBe(true);
-    // TODO: When the preprocessor and warning system are implemented:
-    // 1. Define a macro that changes < db > (pre-expansion) to <db> (post-expansion)
-    // 2. Run the compiler on source using that macro
-    // 3. Verify W-MACRO-001 is emitted with the <  boundary position in expanded text
-    // 4. Verify compilation still succeeds (warning is informational)
   });
 });

@@ -360,33 +360,33 @@ Where `whitespace` is any Unicode whitespace character.
 
 **Worked example — valid:**
 ```scrml
-< db src="db.sql" protect="password" tables="users">
+<db src="db.sql" protect="password" tables="users">
     <p>Content here</>
 </>
 ```
-The space after `<` signals a state block. The state type is `db`.
+The opener `<db>` resolves against the unified state-type registry at Name Resolution (NR, §15.15.6): `db` is a built-in state type, so this is a state block. The no-space form is canonical (§4.3).
 
-**Worked example — valid (tab whitespace):**
+**Worked example — valid (deprecated whitespace form):**
 ```scrml
-<	db src="db.sql" tables="users">
+< db src="db.sql" tables="users">
     <p>Content</>
 </>
 ```
-A tab between `<` and `db` is equally valid. The block splitter classifies this as a state object.
+A space (or tab, or newline) between `<` and the identifier is the **deprecated** opener form: it still compiles but emits W-WHITESPACE-001 (§15.15.5) and becomes E-WHITESPACE-001 in P3. Whitespace does NOT affect classification — `db` resolves as a state type via the registry either way. Migrate to `<db>`.
 
-**Worked example — invalid (name collision):**
+**Worked example — name collision:**
 ```scrml
-< button>...<</>
+<button>...<</>
 ```
-This is a state object named `button`, not an HTML element. If `button` is not a known state type and not declared as a state variable in scope, this SHALL be a compile error (E-STATE-001).
+`button` is a known HTML element name, so `<button>` resolves as an HTML element (NR, by registry + naming convention — lowercase names resolve to HTML / built-in lifecycle types). Classification is by the registry, never by whitespace. (A user state type intended to coexist with an HTML name follows the PascalCase convention, §4.3; the leading-whitespace form is not a classification signal.)
 
 ### 4.3 The Disambiguation Rule
 
 **Status (Phase P1, 2026-04-30 — state-as-primary unification).** The whitespace-after-`<` discriminator was the v0 disambiguator and is now **informational only**. Authoritative tag-vs-state-type resolution moves to the Name Resolution stage (NR, Stage 3.05; see §15.X) which consults the unified state-type registry. The block splitter still records whether whitespace appeared after `<` (used by W-WHITESPACE-001 diagnostics and by NR fall-back heuristics), but it no longer drives the tag/state classification at the syntactic layer.
 
-**Convention preserved (advisory):**
+**Canonical form — no-space (§15.15.5 / §15.15.6):**
 
-> If `<` is immediately followed by an identifier character (no whitespace), the canonical form is an HTML element or a component reference. If `<` is followed by whitespace before the identifier, the canonical form is a state-type instantiation.
+> The canonical opener is no-space: `<identifier>` for HTML elements, component references, state-type instantiations, and scrml structural elements alike. Name Resolution (NR, Stage 3.05) resolves the kind against the unified state-type registry plus the naming convention — a lowercase name resolves to an HTML element or built-in lifecycle type, a PascalCase name to a component or a registered state type. Whitespace after `<` is the deprecated v0 form (W-WHITESPACE-001 → E-WHITESPACE-001 in P3); the block splitter records it for diagnostics, but it is NOT a classification signal.
 
 **Migration path:**
 
@@ -567,36 +567,29 @@ scrml defines a preprocessor pass that runs before the block splitter (§22). Th
 - The preprocessor SHALL produce output that is treated as source text by the block splitter. The block splitter applies its rules — including §4.1 (HTML tag syntax), §4.2 (state object syntax), §4.3 (disambiguation rule), §4.6 (`<` suppression), and §4.7 (`//` comment suppression) — to the expanded text without knowledge of which characters originated from macro expansion and which originated from literal source.
 - The block splitter SHALL NOT distinguish between macro-expanded characters and literal source characters. For block-splitting purposes, all input characters are equivalent regardless of origin.
 - Macro authors are responsible for ensuring that macro expansions produce syntactically valid scrml at the block-grammar level. A macro expansion that produces an ill-formed block — for example, an unclosed `${` or an unmatched `<` at markup-context level — SHALL cause the block splitter to emit an error, and the error message SHALL reference the block-splitter input span, not the original pre-expansion macro invocation span.
-- A macro expansion that collapses whitespace between `<` and an identifier — for example, expanding `OPEN_TAG(div)` to `<div` rather than `< div` — SHALL produce the HTML element interpretation. This is defined behavior, not an error. Macro authors who intend a state object opener MUST ensure their expansion includes at least one whitespace character between `<` and the identifier.
-- A macro expansion that introduces whitespace between `<` and an identifier where no whitespace existed in the pre-expansion source — for example, expanding `<db` to `< db` — SHALL produce the state object interpretation. This is defined behavior, not an error. Macro authors who intend an HTML element opener MUST ensure their expansion produces `<` immediately followed by the identifier with no intervening whitespace.
-- The compiler SHOULD emit a warning (W-MACRO-001) when a macro expansion alters the block type at a `<` boundary — that is, when the pre-expansion character sequence would have produced one block type and the post-expansion sequence produces a different block type. This warning is informational; it does not prevent compilation.
+- A macro expansion that changes whether whitespace appears between `<` and the identifier does NOT change the block's classification. Name Resolution (§15.15.6) resolves the opener by the identifier — registry lookup plus naming convention — never by whitespace. A macro-inserted leading whitespace produces the deprecated opener form and surfaces W-WHITESPACE-001 (§15.15.5), exactly as a hand-written leading whitespace would; the block type is unchanged. Macro authors SHOULD emit the no-space canonical form (`<identifier>`).
 
-**Rationale:** The preprocessor runs as a text transformation pass. Requiring the preprocessor to be aware of block grammar, or requiring it to preserve whitespace context around all `<` boundaries, would couple the preprocessor implementation to the block splitter grammar. Instead, the rule establishes that the preprocessor's output is the ground truth that the block splitter consumes. The cost is that macro authors must reason about the block-grammar consequences of their expansions. The compiler warning W-MACRO-001 mitigates the discovery cost of unintentional block-type changes.
+**Rationale:** The preprocessor runs as a text transformation pass. Requiring the preprocessor to be aware of block grammar would couple the preprocessor implementation to the block splitter grammar. Instead, the preprocessor's output is the ground truth the block splitter consumes. Because NR resolves the opener by identifier (not by whitespace, per the P1 state-as-primary unification, §4.3), a macro expansion cannot silently change a block's type by adding or removing whitespace — at most it emits the deprecated whitespace opener form (W-WHITESPACE-001), which the author then migrates to the no-space canonical form.
 
-**Worked example — defined behavior (whitespace collapse produces tag):**
+**Worked example — macro output is plain source:**
 
-Suppose a macro `INLINE(name)` expands to `<${name}>` (a hypothetical macro syntax that substitutes `name`). If `name` is `div`, the expansion is `<div>` — `<` immediately followed by `d`, which is an HTML element opener. This is the tag interpretation. This is defined behavior.
+Suppose a macro `INLINE(name)` expands to `<${name}>` (a hypothetical macro syntax that substitutes `name`). If `name` is `div`, the expansion is `<div>` — NR resolves `div` as an HTML element. If `name` is `db`, the expansion is `<db>` — NR resolves `db` as a state type. The opener is the no-space canonical form either way; classification is by the identifier, not by whitespace.
 
-**Worked example — defined behavior (whitespace insertion produces state):**
+**Worked example — macro-inserted whitespace is the deprecated form:**
 
-Suppose a macro `STATE(name)` expands to `< ${name}>`. If `name` is `db`, the expansion is `< db>` — `<` followed by a space, which is a state opener. This is the state interpretation. This is defined behavior.
-
-**Worked example — warning case:**
-
-Pre-expansion source contains `<db src="db.sql">`. A macro substitution replaces `db` with a value that includes a leading space, producing `< db src="db.sql">` in the expanded output. The pre-expansion sequence would have been classified as an HTML element opener; the post-expansion sequence is classified as a state opener. The compiler SHALL emit W-MACRO-001 identifying the `<` position in the expanded text and the block-type change.
+Suppose a macro `STATE(name)` expands to `< ${name}>`. If `name` is `db`, the expansion is `< db>` — the deprecated whitespace opener form. NR still resolves `db` as a state type (whitespace is not a classification signal); the compiler emits W-WHITESPACE-001 (§15.15.5). The author migrates the macro to emit `<${name}>`.
 
 ### 4.10 Rule: Newline Before Tag Identifier
 
-**Added:** 2026-03-25 — resolves Phase 0 Design Review Issue 1.2.
+**Added:** 2026-03-25 — resolves Phase 0 Design Review Issue 1.2. **Amended (state-as-primary unification, Phase P1, 2026-04-30):** whitespace after `<` no longer classifies the opener (§4.3); a newline before the identifier is the deprecated whitespace opener form, not a state-vs-HTML signal.
 
-A newline between `<` and an identifier is whitespace per §4.3. The block is classified as a state object, not an HTML element. No multiline HTML element opening syntax exists in scrml. Attribute lists may still span multiple lines as long as `<` is immediately followed by the identifier (no whitespace). E-STATE-001 diagnostics SHOULD hint when the identifier is a known HTML element name.
+A newline between `<` and an identifier is whitespace per §4.3: it produces the **deprecated** opener form (W-WHITESPACE-001 → E-WHITESPACE-001 in P3), not a different block type. Name Resolution (§15.15.6) classifies the opener by the identifier (registry + naming convention), regardless of whitespace. There is still no multiline HTML-element *opening* syntax — `<` followed by a newline (or any whitespace) before the identifier is the deprecated form, to be migrated to `<identifier>`.
 
 **Normative statements:**
 
-- A newline between `<` and an identifier SHALL cause the block to be classified as a state object per §4.3.
-- No multiline HTML element opening syntax SHALL exist. `<` MUST be immediately followed by the identifier to produce an HTML element.
-- Attribute lists after the tag identifier MAY span multiple lines. The multiline restriction applies only to the `<` + identifier boundary.
-- When an E-STATE-001 error fires because the identifier is a known HTML element name (e.g., `< div`), the compiler SHOULD include a hint in the diagnostic: "Did you mean `<div>` (no space after `<`)?"
+- A newline (or any whitespace) between `<` and an identifier produces the deprecated whitespace opener form per §4.3 and surfaces W-WHITESPACE-001. It does NOT change the block's classification — NR resolves the opener by the identifier.
+- The canonical opener places `<` immediately before the identifier (`<identifier>`), with no intervening whitespace.
+- Attribute lists after the tag identifier MAY span multiple lines. The canonical no-space requirement applies only to the `<` + identifier boundary.
 
 ### 4.11 Canonical Keywords
 
@@ -8987,7 +8980,7 @@ State types used for projection are declared with state block syntax (§4.2). A 
 intended for use as a communication channel is declared at file scope or in a shared module:
 
 ```
-state-type-decl  ::= '< ' identifier '>' field-decl* closer
+state-type-decl  ::= '<' identifier '>' field-decl* closer
 field-decl       ::= identifier ':' type-expr '=' literal
 ```
 
@@ -16976,7 +16969,7 @@ Rationale: the unified purity contract preserves the `< machine>` subsystem's re
 | E-HTML-002 | §24.2 | Content model violation (only in `strict` mode) | Error |
 | E-HTML-003 | §24.2 | Wrong type for HTML attribute | Error |
 | W-HTML-001 | §28.1 | Content model violation under `warn` mode | Warning |
-| W-MACRO-001 | §4.9 | Macro expansion alters block type at `<` boundary | Warning |
+| ~~W-MACRO-001~~ | §4.9 | **Retired 2026-06-19 (S209 — state-as-primary unification follow-through).** Premised on a macro expansion altering block type at a `<` boundary via whitespace; under NR (§15.15.6) whitespace never reclassifies an opener (P1, 2026-04-30), so the trigger cannot occur. Macro-inserted leading whitespace surfaces W-WHITESPACE-001 (§15.15.5) instead. Spec-only — never implemented. | — |
 | W-PROTECT-001 | §11.4 | Function touches protected field but is not `server`-annotated | Warning |
 | W-NAV-001 | §20.3 | `navigate(path, .Hard)` from client function cannot be escalated | Warning |
 | W-NAME-001 | §15.6 | Component name misleadingly matches a different HTML element type | Warning |
@@ -27190,13 +27183,14 @@ W-DEPRECATED-001: `<machine>` keyword is deprecated; use `<engine>` instead.
 ```
 
 The user-named identifier in `name=` (e.g. `HOSMachine`, `MarioMachine`) is unchanged
-under either keyword — only the `< machine` / `< engine` opener token is renamed. See
+under either keyword — only the `<machine>` / `<engine>` opener token is renamed. See
 DD1 deep-dive `state-as-primary-unification-2026-04-30.md` and the state-as-primary
 debate (Approach A, design-insights.md) for the full rationale.
 
-A machine declaration uses the `< engine` opener (P1 canonical) or the deprecated
-`< machine` opener. Both: a space after `<` marks the opener as a state type, per §4.
-The engine name is a plain identifier (PascalCase by convention). The
+A machine declaration uses the `<engine>` opener (P1 canonical) or the deprecated
+`<machine>` opener. The opener resolves as an engine/state type at Name Resolution
+(§15.15.6); the no-space form is canonical (§4.3) and the leading-whitespace form is
+deprecated (W-WHITESPACE-001). The engine name is a plain identifier (PascalCase by convention). The
 `for TypeName` clause names the type this engine governs.
 
 **Amended:** 2026-04-08 — Radical doubt debate (Approach C). `for EnumTypeName` broadened
@@ -28905,7 +28899,7 @@ State authority in scrml uses a **two-tier model**. The tier is chosen based on 
 #### 52.3.1 Syntax
 
 ```ebnf
-state-type-decl ::= "<" ws TypeName (ws authority-attr)? (ws table-attr)? (ws protect-attr)? ">"
+state-type-decl ::= "<" TypeName (ws authority-attr)? (ws table-attr)? (ws protect-attr)? ">"
                     field-list
                     "/"
 
@@ -31024,30 +31018,30 @@ A nested substate is a `< SubstateName>...</>` block declared inside the enclosi
 **Syntax:**
 
 ```
-substate-decl      ::= '< ' SubstateName attribute-list? '>' substate-body '</>'
+substate-decl      ::= '<' SubstateName attribute-list? '>' substate-body '</>'
 substate-body      ::= (field-decl | substate-decl | transition-decl)*
 ```
 
-**Note on opener syntax (§4.3 disambiguation):** The leading space inside `< SubstateName>` is required per §4.3's disambiguation rule. `<SubstateName>` (no space) parses as an HTML element.
+**Note on opener syntax (§4.3):** The canonical substate opener is no-space `<SubstateName>`; Name Resolution resolves the PascalCase name to the substate via the unified state-type registry (§15.15.6). The leading-whitespace form `< SubstateName>` is the deprecated v0 opener (W-WHITESPACE-001 → E-WHITESPACE-001 in P3) — whitespace is not a classification signal.
 
 **Worked example:**
 
 ```scrml
-< Submission>
+<Submission>
     id:    string
     title: string
 
-    < Draft>
+    <Draft>
         body:      string
         draftedAt: Date
     </>
 
-    < Validated>
+    <Validated>
         body:        string
         validatedAt: Date
     </>
 
-    < Submitted>
+    <Submitted>
         body:        string
         submittedAt: Date
     </>
@@ -31064,12 +31058,12 @@ Substates MAY declare outgoing transitions. A transition declaration describes a
 
 ```
 transition-decl    ::= identifier '(' param-list? ')' '=>' substate-ref transition-body
-substate-ref       ::= '< ' SubstateName '>'
+substate-ref       ::= '<' SubstateName '>'
 transition-body    ::= '{' transition-stmt* 'return' state-literal '}'
-state-literal      ::= '< ' SubstateName attribute-list? '>' field-assignments '</>'
+state-literal      ::= '<' SubstateName attribute-list? '>' field-assignments '</>'
 ```
 
-**Explicit `return` required.** A transition body SHALL terminate with an explicit `return` statement whose operand is a `< SubstateName>` literal. This matches `fn` convention (§48) and avoids introducing a third function-body shape. A transition body MAY contain additional statements (local `let`/`const`, `if`/`else` branches, etc.) before the `return`.
+**Explicit `return` required.** A transition body SHALL terminate with an explicit `return` statement whose operand is a `<SubstateName>` literal. This matches `fn` convention (§48) and avoids introducing a third function-body shape. A transition body MAY contain additional statements (local `let`/`const`, `if`/`else` branches, etc.) before the `return`.
 
 **Pre-transition binding — `from`, not `self`.** Inside a transition body, the keyword `from` refers to the substate instance BEFORE the transition. Its fields are readable but not writable. `self` is NOT used in transition bodies (it remains reserved for §51.3.2 machine guards, where it refers to the post-mutation struct state).
 
