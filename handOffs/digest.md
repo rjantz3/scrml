@@ -1,9 +1,9 @@
-<!-- @digest head=51600f0b delta-seq=31 -->
+<!-- @digest head=8c938a58 delta-seq=5 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `51600f0b`** + delta-log **[31]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `51600f0b`
+> **HEAD `8c938a58`** + delta-log **[5]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `8c938a58`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,27 +13,22 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `51600f0b`
-- **HIGH 0** · MED 11 · LOW 17 · Nominal 8
-- Named open HIGHs: _none_
+## Board — from `@gap` tokens @ `8c938a58`
+- **HIGH 1** · MED 11 · LOW 17 · Nominal 8
+- Named open HIGHs: `g-engine-name-attr-swallows-var-duplicate`
 
-## Recent rulings — last 5 `rule` (delta-log S209 — 2026-06-19)
-- `[6]` rule · GRAFT RATIFIED (user "record pa direct") — ship a-A(reason-death list)+b-B(footprint surface) as INVESTIGATION-SURFACES-WITH-CONTEXT not scores; gate b-A(dock-r… → design-insights.md
-- `[9]` rule · sPA AUTONOMY CORRECTION (user "they need to run autonomously. I had to nudge 1 along" + "Im still answering Qs for 11"). ENCODED: spa-scrml.md §"Standing autono… → spa-scrml.md + spa.md
-- `[11]` rule · WORK-PER-TOKEN tracking directive (user pushback) — PA gaining wrap-timing autonomy → START tracking wrap + session-start context draws across sessions; optimiz… → cPA DD curation
-- `[22]` rule · **cPA launch→monitor CORRECTION RATIFIED + LANDED** (user "I can fire sPAs manually" + "land the edit"). Deeper point the user drove (correct): even (b)/(c) don… → cpa-scrml.md + cpa.md + DD OQ#2
-- `[29]` rule/land · **ss6 flags B + C TAKEN** (user "take B and C"). **B:** §54.6.5 NEW code `E-STATE-TRANSITION-NO-RETURN` (spec-ahead/Nominal — enforcement deferred to the §54 su… → SPEC §54.6.5 + REGISTRY.md
+## Recent rulings — last 0 `rule` (delta-log S210 — 2026-06-20)
+- _(none in the latest session)_
 
-## Recent activity — last 6 `disp`/`land`/`find`/`state`
-- `[25]` disp/land · **sPA ss5 (channel-codegen) RE-INTEGRATED** (user "ss5 and ss6 done"). PA-verified (S83: tip a67f04a4, base b67cd6e6 = current main, FF-able clean, NO SPEC.md).… → ss5 merge + known-gaps
-- `[26]` disp/land · **sPA ss6 (type-system-lifecycle) RE-INTEGRATED — NO-EXECUTE** (user "ss5 and ss6 done"). 0 code, all 7 items parked (the spa-scrml.md "whole list stalls → repo… → ss6 merge
-- `[27]` disp/land · **sPA ss9 (server-authority-keyword) RE-INTEGRATED** (user "ss9 and ss10 finished"). PA-verified (S83: tip 03d5d938, base 85d9e958 = current main, clean, no SPE… → ss9 merge + known-gaps
-- `[28]` disp/land · **sPA ss10 (e2e-render-map-test-hygiene) RE-INTEGRATED** (user "ss9 and ss10 finished"). PA-verified (S83: tip 070480b7, base 85d9e958, clean, disjoint from ss9… → ss10 merge
-- `[29]` rule/land · **ss6 flags B + C TAKEN** (user "take B and C"). **B:** §54.6.5 NEW code `E-STATE-TRANSITION-NO-RETURN` (spec-ahead/Nominal — enforcement deferred to the §54 su… → SPEC §54.6.5 + REGISTRY.md
-- `[30]` disp · **External-backend DD dispatched** (scrml-deep-dive `a7fe7a80`, bg no-worktree; user "DD it"). Q: should scrml have a first-class bring-your-own-backend story (… → DD doc (status:current)
+## Recent activity — last 5 `disp`/`land`/`find`/`state`
+- `[1]` state · COLD S210 boot (Profile A FULL "read pa.md and start session", no signal→default A). Digest STALE (delta-log changed since stamp c2f8f1fd) → authoritative fallb… → hand-off-214
+- `[2]` find · **S210 inbox triage — 3 HIGH filed (user "triage the 3 HIGH bugs").** All R26-verified on HEAD 41422726 (S138 reverse-dir). (AD) g-attr-interp-fn-name-not-renam… → known-gaps §S210 + 3 @gap tokens
+- `[3]` disp · **2 HIGH fix dispatches (user "dispatch the 3 HIGH fixes")** — scrml-js-codegen-engineer, isolation:worktree, bg, opus. (1) **AE** `engine-name-attr-reject-2026… → docs/changes/{engine-name-attr-reject,codegen-interp-literal}-2026-06-20/BRIEF.md
+- `[4]` state · **3 sibling acks sent + giti LOW filed (user "draft the sibling acks").** giti finding re-verified on HEAD 41422726 (E-COMPONENT-035 ×2, misleading cross-file-i… → 6nz/flogence/giti handOffs/incoming/
+- `[5]` disp/land · **sPA ss4 (block-splitter-native-parser) RE-INTEGRATED** (user "your reco looks good, go"). S83-verified (tip 84e68141==reported, merge-base e8a5491f, only ast-… → f65b1de9 + known-gaps + master-list
 
 ## State
-- Version: 0.7.0 · maps: 1 commits behind HEAD (watermark 41422726, HEAD 51600f0b)
+- Version: 0.7.0 · maps: 12 commits behind HEAD (watermark 41422726, HEAD 8c938a58)
 - Recent wraps:
   - 28de9c81 wrap(s209): close — crash-recovered; despace arc + 7-sPA wave + cPA correction + B/C; ss4/ss13/DD-verdict to next PA
   - d0c5a96a chore(s208): wrap-finalize — recent-sessions + digest regen at settled HEAD
