@@ -5561,6 +5561,62 @@ function registerEngineDecl(
   // already surfaces a diagnostic.
   if (varName.length === 0) return;
 
+  // engine-name-dual-table-fix (2026-06-20) — TRUE when the engine's variable was
+  // re-bound (above) to a user-declared machine-typed cell `@x: N` (§51.3.3). The
+  // collision branch below then UNIFIES (attaches engineMeta to the existing cell)
+  // instead of firing E-ENGINE-VAR-DUPLICATE — the cell IS the engine's governed
+  // variable, not a separate declaration.
+  let boundToGovernedCell = false;
+
+  // engine-name-dual-table-fix (2026-06-20) — §51.3.3 / §7495 governed-cell binding.
+  // A MODERN engine declared with `name=N` (state-child body) MAY govern a
+  // machine-typed cell `@x: N` (the §51.3.3 binding form — `@x: N` where
+  // `<engine name=N>` governs it). In that case the machine-typed cell `@x` IS
+  // the engine's governed variable; the engine MUST NOT auto-declare a SEPARATE
+  // phantom cell (the prior `name=`-derived var, e.g. `modeMachine`). When the
+  // engine governs `@x` but the phantom var diverges, the §51.0 engine emits a
+  // POPULATED transition table keyed on the phantom while the §51.3 write-guard
+  // for `@x` reads an EMPTY table — every legal transition throws E-ENGINE-001-RT
+  // at runtime. Reconcile by binding the engine's variable to the user's cell.
+  //
+  // Gate on the MODERN body shape (a PascalCase state-child opener in rulesRaw —
+  // the same `/<\s*[A-Z]/` heuristic type-system.ts:buildMachineRegistry uses).
+  // The LEGACY arrow-body named machine (`<engine name=UserFlow for=Column> { .A => .B }`)
+  // populates machineRegistry.rules and governs its cells via the §51.3 write-guard
+  // (which already works) — its rulesRaw is `.A => .B`, NOT `<Variant>`, so this
+  // gate is false and that path is untouched. A `var=` override (explicit user
+  // choice) is also exempt — the user named the cell deliberately.
+  if (
+    engineDecl.varNameOverride == null &&
+    typeof engineDecl.engineName === "string" && engineDecl.engineName.length > 0 &&
+    typeof engineDecl.rulesRaw === "string" && /<\s*[A-Z]/.test(engineDecl.rulesRaw)
+  ) {
+    const engName = engineDecl.engineName;
+    // Find the (single) machine-typed cell whose annotation names THIS engine.
+    let governedCellName: string | null = null;
+    let multiple = false;
+    for (const [cellName, rec] of fileScope.stateCells) {
+      if (rec == null || rec.engineMeta != null) continue;            // skip engine cells
+      const ann = typeof (rec.declNode as any)?.typeAnnotation === "string"
+        ? ((rec.declNode as any).typeAnnotation as string).trim()
+        : "";
+      if (ann === engName) {
+        if (governedCellName != null) { multiple = true; break; }
+        governedCellName = cellName;
+      }
+    }
+    // Bind the engine's variable to the user's machine-typed cell. When exactly
+    // one such cell exists, it is the governed variable (§51.3.3); the engine
+    // unifies with it below (the collision branch attaches engineMeta to the
+    // existing record instead of firing E-ENGINE-VAR-DUPLICATE). A modern engine
+    // renders / auto-declares ONE cell, so a multi-cell binding is not the modern
+    // shape — fall through to the auto-derived var unchanged in that case.
+    if (governedCellName != null && !multiple) {
+      varName = governedCellName;
+      boundToGovernedCell = true;
+    }
+  }
+
   // S182 (Fix 1) — opener `effect=` was present but NOT in the required
   // `${...}` logic-block form (the parser flagged `openerEffectMalformed`).
   // Fire E-ENGINE-EFFECT-NOT-INTERPOLATED here in PASS 10.A, independent of the
@@ -5591,6 +5647,31 @@ function registerEngineDecl(
   const isLegacyMachine = engineDecl.legacyMachineKeyword === true;
   const existing = fileScope.stateCells.get(varName);
   if (existing != null && existing.engineMeta == null) {
+    // engine-name-dual-table-fix (2026-06-20) — UNIFICATION (not a duplicate).
+    // When the existing non-engine cell IS the machine-typed cell `@x: N` that
+    // binds THIS engine (discovered above), the cell is the engine's governed
+    // variable per §51.3.3 — NOT a separate declaration. Attach `engineMeta` to
+    // the existing record so codegen (collectC12EngineDecls / buildEngineBindingsMap
+    // / emit-engine table + write-guard) drives the engine off the SAME cell the
+    // user reads + writes (`@mode`), and the populated §51.0 transition table is
+    // the one the write-guard consults. Stamp the engine-decl `_record` to the
+    // unified record so the C12 discovery walker finds it.
+    if (boundToGovernedCell) {
+      (existing as any).engineMeta = makeEngineRecord(engineDecl, fileScope, varName).engineMeta;
+      Object.defineProperty(engineDecl, "_record", {
+        value: existing,
+        enumerable: false,
+        configurable: true,
+        writable: true,
+      });
+      Object.defineProperty(engineDecl, "_cellKind", {
+        value: "engine",
+        enumerable: false,
+        configurable: true,
+        writable: true,
+      });
+      return;
+    }
     // Existing record is a NON-engine state-cell — duplicate.
     if (!isLegacyMachine) {
       fireEngineVarDuplicate(engineDecl, existing, varName, errors, filePath);

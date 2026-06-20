@@ -226,7 +226,23 @@ export function buildMachineBindingsMap(fileAST: any): Map<string, { engineName:
           if (child && child.kind === "state-decl" && child.machineBinding) {
             const engineName: string = child.machineBinding;
             const machine = machineRegistry.get(engineName);
-            if (machine && child.name) {
+            // engine-name-dual-table-fix (2026-06-20) — a machine-typed cell `@x: N`
+            // whose bound machine `N` is a MODERN engine (state-child body) is
+            // governed by the §51.0 engine path, NOT the §51.3 arrow-rule write-guard.
+            // A modern engine registers EMPTY `machine.rules` (type-system.ts
+            // buildMachineRegistry — the rules live in engineMeta.stateChildren and
+            // feed `emit-engine.ts`'s POPULATED `__scrml_engine_<var>_transitions`).
+            // Emitting a §51.3 binding here would point the write-guard at an EMPTY
+            // `__scrml_transitions_N` table → every legal transition throws
+            // E-ENGINE-001-RT at runtime. SKIP it: SYM unified the engine's variable
+            // to `@x` (registerEngineDecl), so the cell is in `engineBindings` and
+            // `_emitReactiveSet` routes `@x = .V` through `emitEngineWriteGuard`
+            // against the populated table. The LEGACY arrow-body named machine keeps
+            // a non-empty `machine.rules`, so it still gets its §51.3 binding here.
+            const isModernEngine = machine != null
+              && Array.isArray(machine.rules) && machine.rules.length === 0
+              && machine.isDerived !== true;
+            if (machine && child.name && !isModernEngine) {
               result.set(child.name as string, {
                 engineName,
                 tableName: `__scrml_transitions_${engineName}`,
@@ -356,6 +372,14 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
           for (const l of emitDerivedDeclaration(machine)) lines.push(l);
           continue;
         }
+        // engine-name-dual-table-fix (2026-06-20) — a MODERN engine (state-child
+        // body) registers EMPTY `machine.rules`; its transitions live in the §51.0
+        // engine table `__scrml_engine_<var>_transitions` (emit-engine.ts). Emitting
+        // an empty `__scrml_transitions_<name>` here is dead output (no write-guard
+        // reads it post-fix — see buildMachineBindingsMap modern-engine skip). Skip
+        // it for output minimality. The LEGACY arrow-body named machine keeps a
+        // non-empty `machine.rules`, so its keyed §51.3 table is still emitted.
+        if (Array.isArray(machine.rules) && machine.rules.length === 0) continue;
         lines.push("");
         for (const l of emitTransitionTable(`__scrml_transitions_${name}`, machine.rules)) {
           lines.push(l);

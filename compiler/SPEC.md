@@ -24866,6 +24866,7 @@ body's own, not inherited by nested plain markup.
 | Attribute | Required? | Meaning |
 |---|---|---|
 | `for=Type` | REQUIRED | The enum type the engine is over. |
+| `name=Identifier` | optional | The engine's named identifier (PascalCase by convention), used for cross-file mount (`<Name/>`, §51.0.D) and as the machine name a machine-typed cell `@x: Name` binds to (§51.3.3 / §51 P1). `name=` does NOT source the auto-declared variable name — that derives from `for=Type` per §51.0.C (or `var=`). When a modern engine carries `name=N` AND a machine-typed cell `@x: N` is declared in scope, the cell `@x` IS the engine's governed variable (no separate auto-declared cell). `name=` and `for=` SHALL be bareword-identifier values (§5.1); quoted-string values SHALL be a compile error. Both `<engine name=N for=T>` and the legacy `<machine name=N for=T>` produce identical AST shapes (§51 P1, DD1 2026-04-30). |
 | `initial=.Variant` | REQUIRED on non-derived engines (lint-checked, see §51.0.E) | Sets the starting state. |
 | `derived=expr` | mutually exclusive with `initial=` | Engine value computed from a reactive expression — see §51.0.J. |
 | `pinned` | optional | Opt-out from hoisting per §6.10. Covers BOTH the engine identifier AND the auto-declared variable. |
