@@ -9,14 +9,24 @@
 // and the new compiler/native-parser/lex.js, normalizes outputs to a
 // comparable shape, and asserts kind+text+span match per token.
 //
-// The M1 lexer ladder is COMPLETE. M1.5 (commit bcb48c9f) closed the final
-// bench-file disposition gap — `expr-literals.js` flipped to the "full"
-// byte-identical disposition. The regex-token shape (native's
-// `RegexLit { pattern, flags }` payload vs Acorn's single `regexp` token)
-// is normalized via the `ACORN_LABEL_TO_KIND` map (`"regexp" -> RegexLit`)
-// — the M1.5 work itself turned out to be template-mode normalization (the
-// regex + BigInt token kinds were already normalized correctly). No bench
-// file currently records a regex-pending SKIP.
+// The M1 lexer ladder is COMPLETE. As of ss4 item-2 EVERY bench file flips
+// to the "full" byte-identical disposition — there are no remaining residual
+// (M1.2-string / M1.2-template) gates. The final three residuals
+// (decl-class.js, expr-optional-chain.js, expr-template-literal.js) were
+// comparator-side fidelity gaps, NOT native-lexer bugs:
+//   - a plain-object lookup-table prototype-pollution bug mis-classified the
+//     `constructor` class-body member name (fixed with an own-property
+//     `lookup()` guard, mirroring token.js makeIdentOrKeyword);
+//   - the scrml-only HARD keyword set (`fn`, `is`, `not`, `match`, …) — which
+//     Acorn surfaces as `name` but the native lexer reserves — needed a
+//     comparator re-classification table (NATIVE_SCRML_KEYWORDS), an
+//     INTENTIONAL scrml-extension divergence;
+//   - the closing-backtick fold was empty-trailer-only and the template
+//     depth tracking was flat counters that mis-handled NESTED templates;
+//     both were generalized (full fold + frames stack).
+// The regex-token shape (native's `RegexLit { pattern, flags }` payload vs
+// Acorn's single `regexp` token) is normalized via the `ACORN_LABEL_TO_KIND`
+// map (`"regexp" -> RegexLit`). No bench file currently records a SKIP.
 
 import { describe, test, expect } from "bun:test";
 import { readFileSync, readdirSync } from "fs";
@@ -161,6 +171,43 @@ const NATIVE_CONTEXTUAL_KEYWORDS = {
     "as":    TokenKind.KwAs,
 };
 
+// scrml-extension HARD keywords — barewords that are reserved in scrml
+// (JS_KEYWORDS in compiler/native-parser/token.js) but are ordinary
+// identifiers in JS, so Acorn surfaces them as label="name". The native
+// lexer recognizes them as dedicated Kw* TokenKinds UNCONDITIONALLY (they
+// are HARD keywords, not contextual — keyword-as-member-property is admitted
+// by parseMemberProperty at the PARSE layer, not the lexer; see token.js
+// lines ~215-219). This is an INTENTIONAL scrml-extension divergence: the
+// comparator re-classifies Acorn's `name` surface for these barewords to the
+// matching native Kw* so the byte-identical gate measures real divergences,
+// not scrml's deliberately-larger keyword set. Source of truth: the
+// scrml-only entries of JS_KEYWORDS in token.js.
+const NATIVE_SCRML_KEYWORDS = {
+    "is":     TokenKind.KwIs,
+    "not":    TokenKind.KwNot,
+    "match":  TokenKind.KwMatch,
+    "lift":   TokenKind.KwLift,
+    "fail":   TokenKind.KwFail,
+    "render": TokenKind.KwRender,
+    "given":  TokenKind.KwGiven,
+    "some":   TokenKind.KwSome,
+    "lin":    TokenKind.KwLin,
+    "fn":     TokenKind.KwFn,
+    "server": TokenKind.KwServer,
+    "pure":   TokenKind.KwPure,
+};
+
+// OWN-property lookup. The label/keyword tables are plain objects, so a bare
+// `TABLE[key]` for a key named `constructor` / `toString` / `valueOf` /
+// `hasOwnProperty` / `__proto__` (etc.) resolves to the inherited
+// Object.prototype member instead of `undefined`, mis-classifying that token
+// to a non-string kind (e.g. the class-body member name `constructor` would
+// resolve to the `Object` constructor function). This mirrors the native
+// lexer's own guard in token.js makeIdentOrKeyword.
+function lookup(table, key) {
+    return Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined;
+}
+
 function normalizeAcornToken(tok, source) {
     const tt = tok.type;
     const text = source.substring(tok.start, tok.end);
@@ -168,8 +215,9 @@ function normalizeAcornToken(tok, source) {
 
     // Keyword lookup wins over label (for reserved words Acorn flags via
     // tt.keyword, e.g. `if`, `for`, `function`, `return`, `const`, `var`).
-    if (tt.keyword && ACORN_KEYWORD_TO_KIND[tt.keyword]) {
-        return { kind: ACORN_KEYWORD_TO_KIND[tt.keyword], text, start: tok.start, end: tok.end };
+    const kwKind = tt.keyword ? lookup(ACORN_KEYWORD_TO_KIND, tt.keyword) : undefined;
+    if (kwKind) {
+        return { kind: kwKind, text, start: tok.start, end: tok.end };
     }
 
     // Acorn-as-name contextual keywords — re-classify against the native
@@ -178,8 +226,18 @@ function normalizeAcornToken(tok, source) {
     // label="name", but the native lexer treats them as Kw* unconditionally.
     // Re-classifying here keeps the byte-identical comparator aligned with
     // the native lexer's keyword-set policy.
-    if (label === "name" && NATIVE_CONTEXTUAL_KEYWORDS[text]) {
-        return { kind: NATIVE_CONTEXTUAL_KEYWORDS[text], text, start: tok.start, end: tok.end };
+    if (label === "name") {
+        const ctxKind = lookup(NATIVE_CONTEXTUAL_KEYWORDS, text);
+        if (ctxKind) {
+            return { kind: ctxKind, text, start: tok.start, end: tok.end };
+        }
+        // scrml-extension HARD keywords (`fn`, `is`, `not`, `match`, …) —
+        // Acorn surfaces them as `name`; the native lexer reserves them.
+        // INTENTIONAL scrml-extension divergence (see NATIVE_SCRML_KEYWORDS).
+        const scrmlKind = lookup(NATIVE_SCRML_KEYWORDS, text);
+        if (scrmlKind) {
+            return { kind: scrmlKind, text, start: tok.start, end: tok.end };
+        }
     }
 
     // text-driven disambiguation for operator-family collapsed labels
@@ -232,7 +290,7 @@ function normalizeAcornToken(tok, source) {
         if (text === "-") return { kind: TokenKind.Minus, text, start: tok.start, end: tok.end };
     }
 
-    const mapped = ACORN_LABEL_TO_KIND[label];
+    const mapped = lookup(ACORN_LABEL_TO_KIND, label);
     if (mapped) {
         return { kind: mapped, text, start: tok.start, end: tok.end };
     }
@@ -252,11 +310,12 @@ function normalizeNativeToken(tok) {
 
 function tokenizeWithAcorn(source) {
     const out = [];
-    // M1.5 template-mode tracking — Acorn emits backticks + braces around
+    // Template-mode re-classification — Acorn emits backticks + braces around
     // template-literal interpolations as separate tokens with their own
-    // labels (`"'"`, `"${"`, `"}"`). The native lexer deliberately coalesces
+    // labels (`"`"`, `"${"`, `"}"`). The native lexer deliberately coalesces
     // backticks into the TemplateChunk stream + uses dedicated
-    // TemplateInterpStart/End kinds for the ${ } interp boundaries. The
+    // TemplateInterpStart/End kinds for the ${ } interp boundaries (an
+    // INTENTIONAL scrml-extension divergence — see lex-in-template.js). The
     // re-classifier below brings Acorn's stream into native shape:
     //
     //   - Opening `` ` `` is DROPPED (native's first TemplateChunk starts
@@ -267,48 +326,58 @@ function tokenizeWithAcorn(source) {
     //   - In-template `}` that closes the matching `${...}` is re-classified
     //     as TemplateInterpEnd (instead of RBrace). Nested `{...}` inside
     //     the interp expression are tracked so only the matching close fires.
-    //   - Closing `` ` `` merges with a preceding empty trailing
-    //     TemplateChunk (Acorn shape: empty chunk at [N,N] + backtick at
-    //     [N,N+1]) into a single TemplateChunk text="`" at [N,N+1] —
-    //     matching the native lexer's chunk-with-backtick representation.
+    //   - Closing `` ` `` is FOLDED into the preceding source-adjacent
+    //     TemplateChunk (Acorn always emits a content chunk — possibly empty
+    //     — directly before the closing backtick). The fold appends a literal
+    //     `` ` `` to that chunk's text and extends its span, matching the
+    //     native lexer's chunk-with-backtick representation: `` `plain` `` →
+    //     one TemplateChunk text="plain`"; `` `${x}` `` → trailing chunk
+    //     text="`".
     //
-    // templateDepth > 0 means we are inside a template literal (between an
-    // unmatched opening `` ` `` and its closing partner). interpDepth > 0
-    // means we are inside one or more `${...}` interpolations. Both stacks
-    // are simple counters because template literals nest at the interp
-    // boundary in a controlled way: an `${` opens a new logic context that
-    // can itself contain another template literal which itself can contain
-    // `${...}`, etc.; depth tracking covers this.
-    let templateDepth = 0;
-    let interpDepth = 0;
+    // STACK MODEL (mirrors lex-in-template.js's templateStack + the LexMode
+    // machine). Template literals nest through their interps —
+    // `` `a ${ `b ${c}` } d` `` — so flat counters are insufficient: an inner
+    // backtick inside an outer interp must be recognized as a NEW template
+    // open, not the outer template's close. `frames` is a stack whose top
+    // tells us our current lexing context:
+    //
+    //   { kind: "tmpl" }              — lexing a template body. A `` ` ``
+    //                                   here CLOSES this template; a `${`
+    //                                   here OPENS an interp.
+    //   { kind: "interp", braces: N } — lexing a `${...}` interp expression.
+    //                                   A `` ` `` here OPENS a nested
+    //                                   template; `{`/`}` track brace nesting
+    //                                   so only the depth-0 `}` closes the
+    //                                   interp.
+    //
+    // Empty stack (or interp top) = ordinary code context.
+    const frames = [];
+    const topFrame = () => (frames.length > 0 ? frames[frames.length - 1] : null);
     try {
         const tokenizer = acorn.Parser.tokenizer(source, ACORN_OPTS);
         let tok = tokenizer.getToken();
         while (tok.type.label !== "eof") {
             const label = tok.type.label;
             const text = source.substring(tok.start, tok.end);
+            const top = topFrame();
 
-            // Backtick boundary — opener dropped, closer merged.
+            // Backtick boundary.
             if (label === "`") {
-                if (templateDepth === 0) {
-                    // Opening — drop, enter template mode.
-                    templateDepth++;
-                } else {
-                    // Closing — merge with preceding empty trailing chunk
-                    // (Acorn shape: empty TemplateChunk at [N,N] sitting
-                    // directly before the closing backtick at [N,N+1]).
+                if (top && top.kind === "tmpl") {
+                    // Closing — fold into preceding source-adjacent chunk.
                     const prev = out[out.length - 1];
                     if (
                         prev &&
                         prev.kind === TokenKind.TemplateChunk &&
-                        prev.text === "" &&
-                        prev.start === tok.start &&
                         prev.end === tok.start
                     ) {
-                        prev.text = "`";
+                        prev.text = prev.text + "`";
                         prev.end = tok.end;
                     } else {
-                        // Standalone closing — emit as TemplateChunk text="`".
+                        // Defensive: no preceding chunk to fold into — emit a
+                        // standalone TemplateChunk text="`". (Acorn always
+                        // emits a content chunk before the closer, so this
+                        // branch is unreached for valid templates.)
                         out.push({
                             kind: TokenKind.TemplateChunk,
                             text: "`",
@@ -316,44 +385,49 @@ function tokenizeWithAcorn(source) {
                             end: tok.end,
                         });
                     }
-                    templateDepth--;
+                    frames.pop();
+                } else {
+                    // Opening (at top level, or nested inside an interp) —
+                    // drop the backtick, enter a template body context.
+                    frames.push({ kind: "tmpl" });
                 }
                 tok = tokenizer.getToken();
                 continue;
             }
 
-            // In-template `${` is interp start, not logic-escape open.
-            if (templateDepth > 0 && interpDepth === 0 && label === "${") {
+            // `${` inside a template body — interp start, not logic-escape.
+            if (top && top.kind === "tmpl" && label === "${") {
                 out.push({
                     kind: TokenKind.TemplateInterpStart,
                     text,
                     start: tok.start,
                     end: tok.end,
                 });
-                interpDepth++;
+                frames.push({ kind: "interp", braces: 0 });
                 tok = tokenizer.getToken();
                 continue;
             }
 
-            // Inside the `${...}` interp body. Track brace depth so the
-            // outermost `}` closes the interp (TemplateInterpEnd); inner
-            // braces stay RBrace per the standard mapping.
-            if (interpDepth > 0) {
+            // Inside a `${...}` interp body — track brace depth so the
+            // depth-0 `}` closes the interp (TemplateInterpEnd); nested
+            // `{...}` braces stay LBrace/RBrace per the standard mapping.
+            if (top && top.kind === "interp") {
                 if (label === "{") {
-                    interpDepth++;
+                    top.braces++;
                 } else if (label === "}") {
-                    interpDepth--;
-                    if (interpDepth === 0) {
+                    if (top.braces === 0) {
                         out.push({
                             kind: TokenKind.TemplateInterpEnd,
                             text,
                             start: tok.start,
                             end: tok.end,
                         });
+                        frames.pop();
                         tok = tokenizer.getToken();
                         continue;
                     }
-                    // else: inner brace close — fall through to standard map.
+                    top.braces--;
+                    // inner brace close — fall through to standard map.
                 }
                 // else: token inside the interp body — normalize standard.
             }
@@ -402,7 +476,7 @@ function tokenizeWithNative(source) {
 // count visible literals + assert interp-token balance.
 // -----------------------------------------------------------------------------
 const BENCH_DISPOSITION = {
-    "decl-class.js":          "M1.2-string", // class body has "computed_" + "method"
+    "decl-class.js":          "full",          // ss4 item-2: byte-identical gate now passes — the `constructor` class-body member name was a comparator prototype-pollution bug (NATIVE_CONTEXTUAL_KEYWORDS["constructor"] resolved to Object.prototype.constructor); the `lookup()` own-property guard closes it. Native correctly emitted Ident throughout.
     "decl-destructure.js":    "full",          // S209 ss4: byte-identical gate now passes (M1.3/M1.5 normalizers landed)
     // M1.3 flips the 3 prior-smoke files to "full": comment-aware lexing
     // now matches Acorn's drop-comments tokenizer surface; the M1.3
@@ -420,9 +494,9 @@ const BENCH_DISPOSITION = {
     // ACORN_LABEL_TO_KIND map ("regexp" → RegexLit, "num" → NumberLit
     // which Acorn also uses for BigInt literals).
     "expr-literals.js":       "full",
-    "expr-optional-chain.js": "M1.2-string",
+    "expr-optional-chain.js": "full",          // ss4 item-2: byte-identical gate now passes — the lone divergence was `?.fn?.()` where `fn` is a scrml HARD keyword (KwFn) the native lexer reserves but Acorn surfaces as `name`. The NATIVE_SCRML_KEYWORDS comparator table re-classifies it (intentional scrml-extension divergence).
     "expr-spread-rest.js":    "full",        // spread/rest + line-comments
-    "expr-template-literal.js":"M1.2-template",
+    "expr-template-literal.js":"full",         // ss4 item-2: byte-identical gate now passes — generalized the closing-backtick fold (was empty-trailer-only) so non-empty trailing chunks (`` `plain` `` → "plain`") fold the closer too, and replaced the flat templateDepth/interpDepth counters with a frames stack so NESTED templates (`` `a ${`b ${c}`} d` ``) recognize inner backticks as new template opens, not the outer close.
     "expr-yield-generator.js":"full",          // S209 ss4: byte-identical gate now passes
     "stmt-control-flow.js":   "full",        // control flow + line-comments
     "stmt-import-export.js":  "full",          // S209 ss4: byte-identical gate now passes
@@ -579,14 +653,24 @@ describe("M1.1 lexer conformance — bench corpus", () => {
                 });
             } else {
                 test.skip(`(M1.3+) byte-identical token stream vs Acorn`, () => {
-                    // S209 ss4: most M1.2-* dispositions FLIPPED to "full" (the
-                    // M1.3/M1.5 normalizers landed and they now pass the gate).
-                    // RESIDUAL genuine byte-identical gaps (still skipped here):
-                    //   - decl-class.js          (class-body token shape)
-                    //   - expr-optional-chain.js (`?.` token split)
-                    //   - expr-template-literal.js (template token shape)
-                    // Closing these is native-lexer (lex.js/token.js) work in the
-                    // M2-M6 native-parser arc (ss4 item 6) — not flip-able yet.
+                    // ss4 item-2: the LAST THREE byte-identical residuals flipped
+                    // to "full" — the entire bench corpus now passes the strict
+                    // (full) gate. The three were comparator-only fidelity gaps,
+                    // NOT native-lexer bugs:
+                    //   - decl-class.js          — the `constructor` class-body
+                    //     member name resolved to Object.prototype.constructor in
+                    //     the plain-object lookup tables (prototype pollution); the
+                    //     `lookup()` own-property guard closes it.
+                    //   - expr-optional-chain.js — `?.fn?.()` reserves `fn` as the
+                    //     scrml HARD keyword KwFn (intentional scrml-extension
+                    //     divergence); NATIVE_SCRML_KEYWORDS re-classifies Acorn's
+                    //     `name` surface for the scrml-only keyword set.
+                    //   - expr-template-literal.js — generalized the closing-
+                    //     backtick fold (non-empty trailers) + a frames-stack
+                    //     template model for NESTED templates.
+                    // This skip-branch is now defensive infrastructure: it would
+                    // only fire for a future bench file with a non-full, non-
+                    // string/template disposition. No such file exists today.
                 });
             }
         });
