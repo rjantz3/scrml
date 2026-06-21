@@ -84,6 +84,19 @@ export interface EventBinding {
    * Absent on top-level / program-scope bindings.
    */
   engineArm?: string;
+  /**
+   * §5.2.2 row 5 (bare-ref form) — `onclick=handler` (no parentheses, no
+   * `${...}`). Set when the event attribute value is a bare identifier
+   * referencing a declared handler. Per SPEC §5.2.2: "`onclick=handler`
+   * (no parentheses) SHALL wire `handler` directly as the event listener
+   * without wrapping." `handlerName` holds the SOURCE name (e.g. `"bump"`);
+   * `emit-event-wiring.ts` resolves it through `fnNameMap` to the encoded
+   * `_scrml_<name>_N` and uses that reference DIRECTLY as the handler value
+   * — NO `function(event){ fn(); }` wrapper (that is the OTHER, call-ref
+   * `fn()` form). The wired listener receives the DOM event as its argument.
+   * Absent on call-ref (`fn()`) and expression (`${}`) bindings.
+   */
+  bareRefHandler?: boolean;
 }
 
 /** A logic binding recorded by HTML gen and consumed by client JS gen. */

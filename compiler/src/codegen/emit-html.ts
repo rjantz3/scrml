@@ -1870,6 +1870,29 @@ export function generateHtml(
                 ...(transitionExit ? { transitionExit } : {}),
               });
             }
+          } else if (name.startsWith("on") && !varName.startsWith("@") && /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(varName)) {
+            // §5.2.2 row 5 (bare-ref form) — `onclick=handler` (no parens, no
+            // `${...}`). The attr-value parser produces a `variable-ref` for a
+            // bare identifier; the SOURCE name (e.g. `bump`) is the declared
+            // handler. Per SPEC §5.2.2: "wire `handler` directly as the event
+            // listener without wrapping." Route to event wiring (NOT literal
+            // attribute emission, which referenced a nonexistent global and left
+            // the handler dead). The `bareRefHandler` flag tells emit-event-wiring
+            // to resolve `handlerName` through fnNameMap to `_scrml_<name>_N` and
+            // wire that reference DIRECTLY (no `function(event){ fn(); }` wrap —
+            // that is the OTHER, call-ref `fn()` form). Mirrors the call-ref
+            // routing below; the wired listener receives the DOM event as its arg.
+            const placeholderId = genVar(`attr_${name}`);
+            parts.push(` data-scrml-bind-${name}="${placeholderId}"`);
+            if (registry) {
+              registry.addEventBinding({
+                placeholderId,
+                eventName: name,
+                handlerName: varName,
+                handlerArgs: [],
+                bareRefHandler: true,
+              });
+            }
           } else {
             // General attribute: strip optional @ prefix so show=@count
             // resolves identically to show=count (allow-atvar-in-attrs).

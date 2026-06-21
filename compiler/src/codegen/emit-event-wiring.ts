@@ -51,6 +51,12 @@ interface EventBinding {
    * collected `values` (the compound cell value) into it, per §41.14.3.
    */
   formForSubmitCell?: string;
+  /**
+   * §5.2.2 row 5 (bare-ref form) — `onclick=handler` (no parens, no `${...}`).
+   * Wire the resolved handler reference DIRECTLY as the listener (no
+   * `function(event){ fn(); }` wrapper). `handlerName` is the SOURCE name.
+   */
+  bareRefHandler?: boolean;
 }
 
 /** A logic binding recorded by HTML gen and consumed by client JS gen. */
@@ -543,6 +549,20 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       // call-ref path: resolve handler name and serialize arguments
       // Resolve the handler: check fnNameMap first, fall back to original name
       const resolvedHandler = fnNameMap.get(handlerName) || handlerName;
+
+      // §5.2.2 row 5 (bare-ref form) — `onclick=handler` (no parens, no
+      // `${...}`). SPEC: "wire `handler` directly as the event listener
+      // without wrapping." Use the resolved (`_scrml_<name>_N`) reference
+      // DIRECTLY as the handler value — NO `function(event){ fn(); }` wrapper
+      // (that is the call-ref `fn()` form below). The wired listener receives
+      // the DOM event as its argument. handlerArgs are always empty for this
+      // form (a bare identifier has no parenthesized args).
+      if (binding.bareRefHandler) {
+        handlerExpr = resolvedHandler;
+        if (!byEventType.has(eventName)) byEventType.set(eventName, []);
+        byEventType.get(eventName)!.push({ placeholderId, handlerExpr });
+        continue;
+      }
 
       // Bug 58 (S140) — formFor synthesized submit handler (§41.14.3).
       //
