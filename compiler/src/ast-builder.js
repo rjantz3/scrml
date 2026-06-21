@@ -7875,7 +7875,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         canFail,
         ...(hasReturnType ? { hasReturnType: true } : {}),
         ...(returnTypeAnnotation ? { returnTypeAnnotation } : {}),
-        span: spanOf(startTok, peek()),
+        // ss4-item3 (2026-06-21): parseRecursiveBody() consumes the closing `}`,
+        // so peek() is the NEXT token (next decl's opener) and overshoots the
+        // span end onto the following line. peek(-1) is the consumed `}` — the
+        // true end of THIS function-decl. (Bodyless case: peek(-1) is still the
+        // last real decl token, strictly better than peek().)
+        span: spanOf(startTok, peek(-1)),
       };
     }
 
@@ -8117,7 +8122,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         ...(hasReturnType ? { hasReturnType: true } : {}),
         ...(returnTypeAnnotation ? { returnTypeAnnotation } : {}),
         ...(idempotentModifier ? { idempotentModifier: true } : {}),
-        span: spanOf(startTok, peek()),
+        // ss4-item3 (2026-06-21): parseRecursiveBody() consumes the closing `}`,
+        // so peek() is the NEXT token (next decl's opener) and overshoots the
+        // span end onto the following line. peek(-1) is the consumed `}` — the
+        // true end of THIS function-decl. (Bodyless case: peek(-1) is still the
+        // last real decl token, strictly better than peek().)
+        span: spanOf(startTok, peek(-1)),
       };
     }
 
@@ -10804,7 +10814,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         ...(returnTypeAnnotation ? { returnTypeAnnotation } : {}),
         // §19.9.7 (A9 Ext 5): `.idempotent()` modifier flag.
         ...(idempotentModifier ? { idempotentModifier: true } : {}),
-        span: spanOf(startTok, peek()),
+        // ss4-item3 (2026-06-21): parseRecursiveBody() consumes the closing `}`,
+        // so peek() is the NEXT token (next decl's opener) and overshoots the
+        // span end onto the following line. peek(-1) is the consumed `}` — the
+        // true end of THIS function-decl. (Bodyless case: peek(-1) is still the
+        // last real decl token, strictly better than peek().)
+        span: spanOf(startTok, peek(-1)),
       });
       continue;
     }
@@ -11022,7 +11037,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         ...(returnTypeAnnotation ? { returnTypeAnnotation } : {}),
         // §19.9.7 (A9 Ext 5): `.idempotent()` modifier flag.
         ...(idempotentModifier ? { idempotentModifier: true } : {}),
-        span: spanOf(startTok, peek()),
+        // ss4-item3 (2026-06-21): parseRecursiveBody() consumes the closing `}`,
+        // so peek() is the NEXT token (next decl's opener) and overshoots the
+        // span end onto the following line. peek(-1) is the consumed `}` — the
+        // true end of THIS function-decl. (Bodyless case: peek(-1) is still the
+        // last real decl token, strictly better than peek().)
+        span: spanOf(startTok, peek(-1)),
       });
       continue;
     }
