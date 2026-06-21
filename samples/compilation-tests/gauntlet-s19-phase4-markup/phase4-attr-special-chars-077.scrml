@@ -1,2 +1,3 @@
-// Attribute values with special chars.
-<a data-info='{"k":"v"}' aria-label="Quote &quot;x&quot; here">link</a>
+// Attribute values with special chars. scrml uses one string delimiter (`"`) language-wide (§5/§1336);
+// interior double-quotes in an attribute value are written with the `&quot;` HTML entity.
+<a data-info="{&quot;k&quot;:&quot;v&quot;}" aria-label="Quote &quot;x&quot; here">link</a>

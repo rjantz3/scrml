@@ -6,12 +6,12 @@ ${
     function userAuth(t) { return t }
     function guestAuth(t) { return t }
 
-    function run(role) {
+    function run(role: Role) {
         lin token = fetchToken()
         return match role {
-            .Admin => adminAuth(token)
-            .User  => userAuth(token)
-            .Guest => guestAuth(token)
+            .Admin :> adminAuth(token)
+            .User  :> userAuth(token)
+            .Guest :> guestAuth(token)
         }
     }
 }

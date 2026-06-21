@@ -1,4 +1,4 @@
-<page route="/">
+<page>
   ^{
     let status = "Active"
 

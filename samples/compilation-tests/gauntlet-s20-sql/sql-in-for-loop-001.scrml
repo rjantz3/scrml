@@ -6,11 +6,11 @@ ${
   let users = ?{`SELECT id, name FROM users`}.all()
 }
 <ul>
-  for (user of users) {
+  <each in=users as user>
     ${
       let posts = ?{`SELECT title FROM posts WHERE user_id = ${user.id}`}.all()
     }
     <li>${user.name} — ${posts.length} posts</>
-  }
+  </each>
 </ul>
 </>

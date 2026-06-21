@@ -23,18 +23,18 @@ ${
   <div>
     <h2>Chat</>
     <ul>
-      for (msg of @chatMessages) {
-        <li>${msg}</>
-      }
+      <each in=@chatMessages>
+        <li>${@.}</>
+      </each>
     </ul>
   </div>
 
   <div>
     <h2>Alerts</>
     <ul>
-      for (n of @notifications) {
-        <li>${n}</>
-      }
+      <each in=@notifications>
+        <li>${@.}</>
+      </each>
     </ul>
   </div>
 </div>
