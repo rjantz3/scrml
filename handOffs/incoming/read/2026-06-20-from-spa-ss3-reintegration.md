@@ -1,33 +1,37 @@
-# sPA ss3 (codegen-expr-attr) → PA — re-integration request
+# sPA ss3 → PA — re-integration (needs: action)
 
-**needs: action** · **2026-06-20** · from **sPA ss3** (S210-rebuild run)
+**From:** sPA ss3 (codegen-expr-attr) · **To:** PA · **Date:** 2026-06-20
+**Action:** re-integrate branch `spa/ss3` → main (single-writer, S147 coherence-gated), then push.
 
-## Summary
-All 3 items on list `ss3-codegen-expr-attr` are **landed-on-branch** `spa/ss3`. List COMPLETE — no parked / dropped items. Requesting re-integration `spa/ss3` → main.
+## LIST COMPLETE — both open items landed
 
-## Branch
-- **Branch:** `spa/ss3` · **tip SHA:** `8676687b`
-- **Base (merge-base with main):** `db906e40` (local main at sPA boot; the worktree was branched off local `main`, not the stale `origin/main` 135c8a78, because local main carried the S210 work incl. item1's verified-HEAD base 956460af).
-- **Lineage** (6 commits = 3 fix + 3 bookkeeping):
-  - `7f3bd4ca` fix item1 · `25ddde8f` bookkeeping
-  - `7ed9ff86` fix item2 · `26c3aab5` bookkeeping
-  - `544e5c42` fix item3 · `8676687b` bookkeeping
-- main advanced (deputy ticks 125-126, → `a3a7e091`) during the run — disjoint from these changes (deputy = maps/digest; ss3 = compiler-source). Clean merge expected.
+| item | known-gap | sev | landing SHA |
+|------|-----------|-----|-------------|
+| 1 | `g-paren-binary-group-dropped-before-method` | HIGH | `aae34c26` |
+| 2 | `g-isop-call-tail-lhs-paren-miscompile` | MED | `d004e6b9` |
 
-## Items landed (per-item SHA)
-1. **`g-attr-bare-compound-is-op-silent-drop`** → `7f3bd4ca`. Bare-compound is-op in an unquoted CONDITION attr (`if=`/`show=`/`else-if=`) silently dropped the keyword run (for `is not` also INVERTED: `if=fn() is not` → `if((fn()))`). Fix = `tokenizer.ts` `attrConditionOperatorAhead` op-set + shared `pushConditionOpReject` helper across the ident AND call paths (call path was a wider latent gap dropping bare binary ops after a call too). S209 'b' REJECT-with-parens. +20 tests.
-2. **`bug-18` / GITI-015** → `7ed9ff86`. is-op with a computed bracket-index LHS (`args[i + 1] is some`) not lowered in `--mode library` → E-CODEGEN-INVALID-JS. Fix = `codegen/rewrite.ts` `DOTTED_LHS` extended with a bracket-index tail. R26 + runtime value-assert. +6 tests.
-3. **`g-each-body-sigil-root-expr-parser`** → `544e5c42`. `@.`/`@.field` escape-hatched in the acorn `parseExprToNode` (`scrmlAtPlugin`) — ExprNode layer couldn't structure the §17.7.3 sigil (root of the ss14 each-sigil classifier false-positive). Fix = `scrmlAtPlugin.readToken` recognises `@.` (inline-ws-tolerant). classifier each-sigil 2→0. +9 tests.
+- **Branch tip:** `a99962d9` (the bookkeeping commit; the progress.md disposition line says tip `d004e6b9` — stale self-reference, the real tip is `a99962d9`).
+- **Parked / dropped:** none. List is fully dispositioned.
 
-## Verification
-- Each fix: R26 reproduce-before + verify-after; full `bun test compiler/tests/` GREEN at each landing (final: **24692 pass / 0 fail**, incl. browser after `bun run pretest` — the gitignored `samples/compilation-tests/dist/` was rebuilt; the initial 140 "failures" were the S209-ss9 fresh-worktree ENV-GAP, not regressions).
-- Pre-commit gate passed on every commit (no `--no-verify`).
-- Per-item NOTES + repros archived under `docs/changes/ss3-item{1,2,3}-*/`.
+## What landed
 
-## Residuals to file (NEW — surfaced during the run, NOT fixed)
-1. **is-op call-tail LHS silently MIScompiles** (`--mode library`): `re.exec(s) is some` emits `re.exec((s) != null)` — `_rewriteParenthesizedIsOp` grabs the call's own arg-parens instead of the whole call. Valid JS so NO E-CODEGEN (silent-WRONG → arguably higher severity than the LOUD bug-18 it sat beside). Separate root cause (the paren-rewrite has no grouping-paren-vs-call guard); touches the load-bearing `_rewriteParenthesizedIsOp`, out of bug-18's surgical scope. Repro: `export function f(re,s){ return re.exec(s) is some ? "h" : "n" }` `--mode library`. Suggest a dedicated item.
-2. **Dead each-sigil band-aid** in `compiler/tests/integration/expr-node-corpus-invariant.test.js` (~lines 134-143/285/388-396): now always-0 after item3. Keeping it MASKS a future `@.`-parse regression (re-excludes from the >50% gate). Remove in a test-hygiene pass. Left in place (out of the surgical parse-fix scope; harmless at 0).
-3. **Native-parser (M2.x) `@.` structuring NOT verified** — item3 fixed the acorn-based production `parseExprToNode`; the separate native pipeline was not checked. Worth a dual-pipeline-canary when that path is activated for this surface.
+- **item1** (CLIENT ExprNode serializer): `(a + " " + b).toUpperCase()` was dropping the grouping parens → `a + " " + b.toUpperCase()` (method binds to `b`, silent precedence miscompile; flogence TF-IDF router killer). Added a `receiverNeedsParens` guard at `emitMember`/`emitIndex`/`emitCall`/`emitNew` (emit-expr.ts) — the receiver-position sibling of Bug W + S205. ALSO closed the identical gap in `emitStringFromTree` (expression-parser.ts round-trip printer) as defense-in-depth. Files: `compiler/src/codegen/emit-expr.ts`, `compiler/src/expression-parser.ts`, +1 integration test, +emit-string-tree-precedence receiver cases.
+- **item2** (LIBRARY string-rewrite): `re.exec(s) is some` → `re.exec((s) != null)` (receiver swallowed; silent-WRONG, valid JS). `_rewriteParenthesizedIsOp` now distinguishes a grouping paren from a call paren (keyword-aware) and captures the whole call chain single-eval via `_scanChainStartLeft`. Files: `compiler/src/codegen/rewrite.ts`, +9 `not-keyword.test.js` tests.
 
-## Worktree
-`../scrml-spa-ss3` (branch `spa/ss3`), node_modules symlinked from main. Left in place for PA re-integration; remove after merge per PA wrap.
+Both R26 value-asserted (item2: 14 runtime assertions + node --check; item1: emit-string + e2e). Each commit passed the full pre-commit gate (suite + browser).
+
+## Base / conflict status (clean re-integration)
+
+- My base was `8c27805e` (session-start origin/main). Main has since advanced to `1a4a3fec` (deputy ticks + §60 `<api>` feature W1/W2).
+- **No conflict:** `git diff --stat 8c27805e..1a4a3fec` over my 5 touched files (emit-expr.ts · expression-parser.ts · rewrite.ts · not-keyword.test.js · emit-string-tree-precedence.test.js) is EMPTY — none were touched main-side. File-delta or merge re-integrates clean.
+- **No leak:** my 3 commits are contained ONLY by `spa/ss3` (verified `git branch --contains`).
+
+## Residuals (track — not items)
+
+1. Dead each-sigil band-aid in `expr-node-corpus-invariant.test.js` (always-0 after the prior run's item3 — test-hygiene removal owed; masks future `@.`-parse regressions). _Carried from the prior run._
+2. Native-parser (M2.x) `@.` structuring NOT verified (separate pipeline). _Carried._
+3. **NEW:** the `emitStringFromTree` receiver-paren fix was defense-in-depth — no empirical miscompile found through that round-trip path, only the identical gap in the same serializer cluster. If a corpus probe later surfaces a real round-trip miscompile, the regression home is `emit-string-tree-precedence.test.js`.
+
+## PA owns (at re-integration)
+
+known-gaps reconciliation — close `g-paren-binary-group-dropped-before-method` + `g-isop-call-tail-lhs-paren-miscompile`; INDEX ss3 row → at-ceiling/empty (both open items drained); worktree `../scrml-spa-ss3` cleanup; changelog/master-list. Also move the flogence repro `handOffs/incoming/read/2026-06-20-from-flogence-BUG-paren-grouping-dropped-before-method.md` to resolved if appropriate (item1 closed it).

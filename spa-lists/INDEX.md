@@ -26,7 +26,7 @@ design-track (debates / DDs / from-scratch subsystems / axiom Qs / rulings) → 
 
 | ss | speciality | n | core files | shared ingestion (one-liner) | fill-target |
 |----|-----------|---|-----------|------------------------------|-------------|
-| 3 | codegen-expr-attr | 3 | rewrite.ts · emit-event-wiring.ts · emit-html.ts · expression-parser.ts | bare-compound is-op / is-op-ternary / `@.`-sigil lowering at the codegen-expr stage. | ~55% · at-ceiling |
+| 3 | codegen-expr-attr | 0 | rewrite.ts · emit-expr.ts · expression-parser.ts | **DRAINED S210** — paren/span cluster (g-paren-binary-group HIGH + g-isop-call-tail MED) integrated `d84e85d2`; prior 3 items (bare-compound is-op / is-op-ternary / `@.`-sigil) integrated `2eea9d4e`. Residuals not minted: each-sigil band-aid test-hygiene · native-parser `@.` · emitStringFromTree defense-in-depth. | drained |
 | 8 | promotion-tailwind | 2 | tailwind-classes.js · collect-class-names.ts · emit-css.ts · commands/promote.js | tailwind utility-class compilation (arbitrary-value remainder) + the promote `--engine` lift. | ~58% · at-ceiling |
 | 11 | doc-currency-corpus | 8 | tutorial.md · ARTICLE-TRUTHFULNESS-AUDIT · articles/ · README.md · website/ · examples/ · samples/compilation-tests/ | doc/corpus currency + the canonical-scrml v0.2.0 content rewrite (B1/B2/C1/C2/C3). | ~62% · healthy (fattest exec) |
 | 4 | block-splitter-native-parser | 3 | block-splitter.js · component-expander.ts · ast-builder.js · native-parser/lex.js · token.js | parse-front-end: block-match-in-lift context + lexer residuals + ast-builder fn-span. | ~55% · healthy |
