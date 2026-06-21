@@ -87,7 +87,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
-- `4a67f5bb` — wrap(s210): close — A2 W0-W3 + ss2/ss3/ss8 + sibling idiomatic audits + AF/B rulings — **LOCAL-ONLY**
+- `0a605d3e` — chore(s210): wrap-finalize — recent-sessions + digest regen at settled HEAD 4a67f5bb — **pushed**
 - `28de9c81` — wrap(s209): close — crash-recovered; despace arc + 7-sPA wave + cPA correction + B/C; ss4/ss13/DD-verdict to next PA — **pushed**
 - `d0c5a96a` — chore(s208): wrap-finalize — recent-sessions + digest regen at settled HEAD — **pushed**
 - `916fe3ae` — wrap(s207): close — block-analysis-emit arc complete (D3-D5) + 2 MED codegen fixes + flogence pure-module HIGH (Fix A in-flight) — **pushed**

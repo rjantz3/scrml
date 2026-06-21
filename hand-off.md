@@ -1,42 +1,40 @@
 # scrml — Session 211 (OPEN)
 
-**Date:** 2026-06-20. **Profile:** A — FULL ("read pa.md and start session", no signal → default A). **Boot:** cold (fresh PA, no warm vPA → no baton). Rotated S210-CLOSE → `handOffs/hand-off-215.md`.
+**Date:** 2026-06-20. **Profile:** A — FULL ("read pa.md and start session" → default A). **Boot:** cold (fresh PA, no warm vPA). Rotated S210-CLOSE → `handOffs/hand-off-215.md`.
 
-> **Thinned (S205).** Mechanical state → `bun scripts/state.ts` + `handOffs/digest.md` · `handOffs/delta-log.md` [S211 1] · `handOffs/deputy-state.md`. This carries the IRREDUCIBLE + in-flight.
+> **Thinned (S205).** Mechanical state → `bun scripts/state.ts` + `handOffs/digest.md` · `handOffs/delta-log.md` [S211 1-7] · `handOffs/deputy-state.md`. Irreducible + in-flight below.
 
-## Boot state
-- **git sync:** scrml + scrml-support both **0/0** with origin @ HEAD `0a605d3e`. Tree clean except `?? docs/graph/` (deputy-owned, untracked). Hooks = config B (`.git/hooks`: pre-commit + post-commit + pre-push) — leave.
-- **Digest CURRENT** (stamp `4a67f5bb` @ HEAD `0a605d3e`). Board **HIGH 0 · MED 9 · LOW 17 · Nominal 8.** Tests **17,487 / 68 skip / 0 fail** (subset) @ v0.7.0.
-- **Inbox:** empty (mine). [scrml-support has 2 giti→support msgs — not this PA's.]
-- **DEPUTY IDLE** — `deputy-maint == main` (not ticking), **maps 51 behind** (watermark `5c68e87e`). Not monitoring. User may boot a fresh deputy (`read vpa.md and boot`) to monitor W3 + catch maps up; else this PA carries the in-flight cold.
+## Board / sync (live)
+- **HEAD `f97a5fba`**, origin **0/0**, deputy-maint `^main == 0`. Board **HIGH 0 · MED 10 · LOW 15 · Nominal 8** (ss7 reconcile: g-reflect resolved [LOW −1], g-mount-hang LOW→MED [LOW −1/MED +1]).
+- **DEPUTY ACTIVE** (NOT idle as S210 said) — ran ticks 138/139 this session (maps refresh → **maps now CURRENT**, digest regen). Reconciled into main; it self-rebases onto main each tick.
 
-## ⚠️ IN-FLIGHT — A2 W3 (typer), agent `a80f17c2cb0c3c4bc`
-- Worktree `agent-a80f17c2cb0c3c4bc`, branch tip **`56d01723`** (4 WIP commits). **Last commit ~2 min before boot → agent likely STILL RUNNING** (final suite / R26 / report phase) OR just stopped. Worktree clean.
-- **Scope COMPLETE-in-commits:** `checkApiDeclarations` typer pass (type-system.ts +346) · all 3 W3 codes `E-API-{ENDPOINT-UNKNOWN,REQ-SHAPE-MISMATCH,PATH-PARAM-UNBOUND}` in src + tests (5-6 refs each) + §34 SPEC rows · `api-decl-typer.test.js` (+311, 16 tests) · `<request api=>` recognition.
-- **NOT confirmed-done:** `progress.md` has NO W3-DONE section (only W2-era) · no full-suite/R26 evidence · no final agent report. **DO NOT LAND until completion verified.**
-- **Land via S67 file-delta** when confirmed done: S83 verify tip == reported; clobber-check `type-system.ts`/`ast-builder.js`/`SPEC.md` vs main base; SKIP agent's stale-base files (`hand-off.md`/`delta-log.md`/`digest.md`/`master-list.md`); gap-reconcile §60.9; full suite; coherence-gated push. NO codegen (W4); §60 banner stays Nominal. BRIEF: `docs/changes/api-primitive-a2-2026-06-20/BRIEF-W3.md`.
+## ✅ DONE this session
+- **A2 W3 (typer)** — landed + pushed `612f92e6` (agent a80f17c2 @2ff87850; S67 file-delta, clobber-safe). checkApiDeclarations + 3 W3 codes + §34 + §60.9 wired + SPEC-INDEX §60 prose fix; +16 tests; full suite 24778/0. NO codegen; §60 Nominal kept.
+- **sPA ss7 (meta-reflect-l22)** — landed + pushed `f97a5fba` (S67 file-delta). item1 g-reflect-variant-shape-inconsistent RESOLVED; item2 g-mount-hang-rails-dev reclassified (compile 100%-CPU infinite-loop in nativeParseFile, NOT mount-hang) → MED + re-clustered ss4 (groundwork `docs/changes/ss7-rails-dev-hang/FINDINGS.md`). Worktree+branch cleaned.
+- **Deputy strand** reconciled (merged deputy-maint `e868a667`); session-state `2030c1b0`.
 
-## TO FIRE (user fires sPAs) — disjoint from W3
-- **ss11** (doc-currency-corpus, fattest) — examples canonical-form + the `<each>` LIGHT-EDIT tier; eligible items 1/3/5/7/8 (4/6 marketing Rule-1-gated, 2 user-owned).
-- **ss7** (meta-reflect-l22) — 2 items (`reflect()`/`^{}` meta-eval variant-shape + happy-dom mount-hang).
-- Avoid while W3 in-flight: ss5/ss6/ss12 (type-system.ts) · ss4 (ast-builder.js) — collide with W3.
+## ⚠️ IN-FLIGHT
+- **A2 W4 (codegen)** — agent **`adc513f2f54817b2d`** (worktree, base `612f92e6`), running. Scope: per-endpoint typed client fetch callable + `<request api= args=>` → parseVariant decode (emit-reactive-wiring.ts + emit-parse-variant.ts reuse); LIMIT-PRIMITIVES; client-only; §60 Nominal stays (W5 flips). S138 R26 mandatory. BRIEF-W4.md archived. **PA lands via S67 on completion.** **⚠ at the W4-landing push: commit any dirty session-state FIRST, THEN the S205 merge-before-push gate** (the merge blocks on uncommitted tracked files — happened twice this session; benign, self-caught).
+- **sPA ss11 (doc-currency-corpus)** — `spa/ss11` advanced `0a605d3e→c2211661`; user fired it in parallel; awaiting its re-integration message. Unknown agent worktrees (a0cca34e/a3ad52a5/a80ecec1[locked]) are likely its dev-agents — LEAVE untouched.
 
-## READY (not yet fired)
-- **A2 W4 (codegen)** — AFTER W3 lands; then W5 (tests + example + B-docs; flips §60 Nominal banner).
-- **bug-20 `promote --engine`** (ruling B) — ready LOW: span-rewrite mirroring `--match`/`--each`, reusing `W-MATCH-RULE-INERT` + `W-ENGINE-INITIAL-MISSING`; NO new lint. Amend SPEC §56.6 to drop the dropped `W-MATCH-TRANSITIONS-ACCRUING` ref.
+## SPENT worktrees → wrap-6b cleanup (NOT now)
+- agent-a80f17c2 (W3, landed) · agent-af018240 (ss7 dev-agent, landed). Leave W4 (adc513f2, locked) + deputy + ss11's worktrees.
+
+## READY (not fired)
+- **A2 W5** — AFTER W4: tests + worked `examples/NN-external-api` + B-docs BYOB guide + **flip §60 Nominal banner**.
+- **bug-20 `promote --engine`** (ruling B) — ready LOW: span-rewrite reusing W-MATCH-RULE-INERT + W-ENGINE-INITIAL-MISSING; amend §56.6.
 
 ## OPEN — needs USER
-- **bug-1 sub-arc 2** (safelist/@apply) — §26.5-deferred; PA lean: stay deferred (the `lint.tailwind-unrecognized-class=off` escape hatch covers it).
-- **Sibling rewrites** — giti/6nz/flogence PAs execute idiomatic rewrites in their own instances (directives in their inboxes). flogence corpus-feed candidate parked.
-- **stdlib Phase 3** (§40.4 fail/!{}/bun-import ruling owed) · **flogence raw-route** (dpa-002 or fold into A2 philosophy) · SSR-of-external-data structural gap (carried with A2).
-- **S209 carried escalations:** ss5-item3 (`g-channel-server-keyword-auto-migrate`) · ss9 §20.5 SPEC examples · ss10 item7/8 · ss6 b17 cases 1-3 · §58 build-story re-bucket · §20.5+despace residual.
-- **Other:** giti/6nz pa.md modernization LOCAL+UNPUSHED in siblings (giti `72fda7c` / 6nz `e6fc5e8`). 6nz AA (bare-tail-match lint-fire regression) open. AF lint impl pending (`g-input-state-markup-nonreactive-lint`).
+- bug-1 sub-arc 2 (safelist/@apply) — §26.5-deferred; PA lean stay-deferred.
+- Sibling rewrites (giti/6nz/flogence PAs, own instances). stdlib Phase 3 (§40.4 ruling owed). flogence raw-route (dpa-002 or fold A2). SSR-of-external-data gap (carried w/ A2).
+- S209 carried: ss5-item3 · ss9 §20.5 · ss10 item7/8 · ss6 b17 · §58 build-story re-bucket.
+- giti/6nz pa.md modernization LOCAL+UNPUSHED in siblings. 6nz AA open. AF lint impl pending.
 
-## Maps
-51 behind (deputy debt). **Do NOT refresh until W3 lands** (W3 changes type-system/ast-builder/SPEC). Refresh post-W3 (fresh deputy or `project-mapper`). Maps are WARN-only in `state.ts --check`.
+## 6nz status (S211 check)
+Nothing unread. Last 6nz bug batch (p10 AD/AE/AF) worked S210; 6nz's own S14 since then re-tested AB/AD/AE against build 8c27805e — all CONFIRMED — + accepted the AF by-design ruling. No new 6nz message filed.
 
 ## pa.md directives in force
-R1–R5 · `---` delimiter · Profile A · digest-first (S203) · S88 isolation · S99/S126 path-discipline · S136 BRIEF.md · S138 R26 verify-before-claim · S147 coherence · S164 bg-commit-race · S205 merge-before-push gate · S119 explicit-pathspec · wrap 8-step · S206 flogence + co-location · S208 sPA role · S209 cPA monitor-not-launch + §2.1 deref-vs-mark · S210 idiomatic-audit-kit + scrml-PA-audits-sibling-PAs-rewrite.
+R1–R5 · `---` delimiter · Profile A · digest-first · S88 isolation · S99/S126 path-discipline · S136 BRIEF.md · S138 R26 · S147 coherence · S164 bg-commit-race · **S205 merge-before-push (commit session-state FIRST — the gate blocks on dirty tracked files)** · S119 explicit-pathspec · wrap 8-step · S206 flogence + co-location · S208 sPA role · S209 cPA monitor-not-launch + §2.1 deref-vs-mark · S210 idiomatic-audit-kit.
 
 ## Tags
-#session-211 #open #profile-a #cold-boot #w3-in-flight #deputy-idle #maps-51-behind #board-high-0
+#session-211 #open #profile-a #w3-landed #w4-in-flight #ss7-landed #ss11-in-flight #deputy-active #board-high-0 #maps-current
