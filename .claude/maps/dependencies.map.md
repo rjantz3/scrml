@@ -1,6 +1,6 @@
 # dependencies.map.md
 # project: scrmlts
-# updated: 2026-06-20  commit: 0a605d3e
+# updated: 2026-06-21  commit: 6d8a47ab
 
 ## Runtime Dependencies (root package.json — v0.7.0)
 @modelcontextprotocol/sdk@1.29.0 — MCP server SDK for scrml MCP integration
@@ -29,7 +29,7 @@ bun>=1.3.13 — required runtime; no Node support (Bun-specific APIs used throug
 | Module | Imports from |
 |--------|-------------|
 | cli.js | commands/compile.js, commands/dev.js, commands/build.js, commands/migrate.js, commands/promote.js |
-| api.js | block-splitter.js, ast-builder.js, code-generator.js, module-resolver.js, component-expander.ts, type-system.ts, engine-graph.ts (S149 — buildEngineGraphJson) |
+| api.js | block-splitter.js, ast-builder.js, code-generator.js, module-resolver.js, component-expander.ts, type-system.ts, engine-graph.ts (S149 — buildEngineGraphJson); **S211: + lint-w-interp-in-raw-content.js (Stage 2.5 wiring, line 52)** |
 | code-generator.js (codegen/index.ts) | codegen/emit-*.ts, codegen/srcmap-provenance.ts, codegen/build-source-map.ts, codegen/source-map.ts, dependency-graph.ts, auth-graph.ts, route-inference.ts |
 | codegen/emit-client.ts | codegen/emit-*.ts, codegen/runtime-chunks.ts, codegen/context.ts; derives _scrml_modules key via moduleRegistryKey() |
 | codegen/emit-engine.ts | codegen/emit-*.ts; emitEngineOpenerEffect() for §51.0.H Form 3 (S148); **S198-S199 engine-hydration arc emitEngineCellHydrationInit/emitEngineServerSourceHydration** |
@@ -44,16 +44,17 @@ bun>=1.3.13 — required runtime; no Node support (Bun-specific APIs used throug
 | engine-statechild-grammar.ts | (standalone — NO imports; pure constant exports: ENGINE_STATE_CHILD_RESERVED_ATTRS + STATE_CHILD_STRUCTURAL_TAGS; placed at compiler/src/ NOT codegen/ to be importable by both type-system and codegen layers without cycle) |
 | engine-graph.ts | types/ast.ts (FileAST shapes via unknown); standalone — no codegen/ imports |
 | auth-graph.ts | types/ast.ts, symbol-table.ts |
-| type-system.ts | types/ast.ts, dependency-graph.ts, protect-analyzer.ts, **engine-statechild-grammar.ts** (ENGINE_STATE_CHILD_RESERVED_ATTRS + STATE_CHILD_STRUCTURAL_TAGS — ss2 item 3; type-system.ts:81) |
+| type-system.ts | types/ast.ts, dependency-graph.ts, protect-analyzer.ts, **engine-statechild-grammar.ts** (ENGINE_STATE_CHILD_RESERVED_ATTRS + STATE_CHILD_STRUCTURAL_TAGS — ss2 item 3; type-system.ts:81); **S211 A2 W3: `checkApiDeclarations` (+346L; line 18053) fires E-API-PATH-PARAM-UNBOUND / E-API-ENDPOINT-UNKNOWN / E-API-REQ-SHAPE-MISMATCH; no new external imports — uses the existing typeRegistry + apiExemptTypeNames** |
 | reachability/*.ts | types/reachability.ts, types/ast.ts |
 | expression-parser.ts | acorn, astring, codegen/code-segments.ts (GITI-017 rewriteCodeSegments fence); **S210: acornNodeToExprNode regex-literal branch uses node.raw (not outer rawSource) — prevents wrong-span serializer bug in call-arg position**; **S210 ss3: @. sigil structuring — each-sigil `IdentExpr` leaf production (no new external imports; internal AST shape change only)** |
+| lint-w-interp-in-raw-content.js | (standalone — no compiler/src imports; `runWInterpInRawContent` walks bsResults BS-output objects directly) |
 | native-parser/*.js | (self-contained; no compiler/src imports) |
 | commands/compile.js | api.js (compileScrml), engine-graph sidecar write site (--emit-engine-graph) |
 | commands/dev.js | api.js (compileScrml); Bun.serve + per-file fs.watch (rewritten S152 — no recursive-dir) |
 | commands/migrate.js | api.js (compileScrml), block-splitter.js, ast-builder.js (buildAST — for rewriteMatchArmArrows AST-driven walk) |
 
 ## Tags
-#scrmlts #map #dependencies #bun #acorn #lsp #mcp #engine-graph #source-map #s149 #s152 #s209 #ss2 #engine-statechild-grammar #ssot-dedup #s210 #engine-name-dual-table #dual-table-fix #symbol-table-governed-cell #emit-reactive-wiring-modern-engine-skip #code-segments-template-hybrid #rewrite-code-segments #expression-parser-regex-literal-raw #ast-builder-collect-braced-body #tokenizer-shift-compound-assign #engine-statechild-comment-opacity #a2-api-decl #api-decl-node #ss3-paren-group #emit-expr-paren-receiver #rewrite-ts-paren-group #ss8-tailwind #ring-offset-arbitrary #tw-arbitrary-string
+#scrmlts #map #dependencies #bun #acorn #lsp #mcp #engine-graph #source-map #s149 #s152 #s209 #ss2 #engine-statechild-grammar #ssot-dedup #s210 #engine-name-dual-table #dual-table-fix #symbol-table-governed-cell #emit-reactive-wiring-modern-engine-skip #code-segments-template-hybrid #rewrite-code-segments #expression-parser-regex-literal-raw #ast-builder-collect-braced-body #tokenizer-shift-compound-assign #engine-statechild-comment-opacity #a2-api-decl #api-decl-node #ss3-paren-group #emit-expr-paren-receiver #rewrite-ts-paren-group #ss8-tailwind #ring-offset-arbitrary #tw-arbitrary-string #s211 #ss11 #w-interp-in-raw-content #lint-w-interp-in-raw-content #a2-w3 #api-decl-typer #check-api-declarations #e-api-path-param-unbound #e-api-endpoint-unknown #e-api-req-shape-mismatch #section-60-2 #section-60-4 #stage-2-5 #bs-lint-stage
 
 ## Links
 - [primary.map.md](./primary.map.md)

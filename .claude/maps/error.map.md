@@ -1,6 +1,6 @@
 # error.map.md
 # project: scrmlts
-# updated: 2026-06-20  commit: 0a605d3e
+# updated: 2026-06-21  commit: 6d8a47ab
 
 scrml's own language error model is values-not-exceptions (SPEC §19.1 — no try/catch, no throw).
 The compiler itself surfaces structured CGError objects to the caller; it never throws on bad input.
@@ -19,10 +19,13 @@ code: string; message: string; span: CGSpan | object; severity: 'error' | 'warni
 |--------|-------|-------------|
 | E-ATTR-* | ~16 | Attribute validation errors |
 | E-ATTR-UNQUOTED-OPERATOR | 1 | **(S188 NEW — SPEC §5.1 / §5.2 / §17.1 / §34, Error; "cluster-A reject + parens")** An unquoted CONDITION attribute (`if=` §17.1 / `show=` §17.2 / `else-if=` §17.1.1) whose value contains a bare BINARY or TERNARY operator (`>= > < <= == != && \|\| + - * /` or ternary `?:`). Per §5.2 an unquoted condition admits ONLY the atomic forms — `@var` / `obj.prop` / `fn()` / prefix `!` — operator conditions SHALL be parenthesized `if=(@n >= 3)` or quoted `if="@n >= 3"` (parens/quotes handle ALL operators; only the bare unquoted form is restricted). Fires EXACTLY ONCE per offending attribute, naming the operator + steering to parens/quotes; the value recovers as `absent` so no E-CTX-001 / E-SCOPE-001 cascade. Pre-fix the value-reader either SILENTLY shredded the operator + RHS (dangerous-class) or the `>` of `>=` closed the tag early (misleading E-CTX-001 "no matching tag"). Detection seam: tokenizer `attrConditionOperatorAhead` + `isConditionAttrName` → `ATTR_OP_REJECT` token [tokenizer.ts]; block-splitter `>=` early non-close guard + ternary `?`-depth tracking [block-splitter.js]; emit `E-ATTR-UNQUOTED-OPERATOR` once at the `ATTR_OP_REJECT` branch [ast-builder.js parseAttributes ~2050]. For a condition mixing a binary operator AND a bare `not` (`if=@x && not @y`): the binary-operator reject fires first on the unquoted-compound structure; once parenthesized, the inner `not` then surfaces E-TYPE-045. Fatal. `1ad740b4`. |
-| E-API-* | 4 | **(S210 A2 NEW — SPEC §60.9, all Error; commit `8d4e96ae`)** `<api>` declaration parsing errors. An `<api>` block produces an `api-decl` AST node (kind `"api-decl"`) with `base` URL + `endpoints[]`. Four codes: |
+| E-API-* | 7 | **(S210 A2 NEW — SPEC §60.9, all Error; commit `8d4e96ae`)** `<api>` declaration PARSING errors (+S211 A2 W3: 3 NEW TYPER codes — E-API-PATH-PARAM-UNBOUND / E-API-ENDPOINT-UNKNOWN / E-API-REQ-SHAPE-MISMATCH, §60.2/§60.4, all Error; commit `612f92e6`)** `<api>` declaration parsing + type-resolution errors. An `<api>` block produces an `api-decl` AST node (kind `"api-decl"`) with `base` URL + `endpoints[]`. Four codes: |
 | E-API-BASE-MISSING | 1 | **(S210 A2 NEW — SPEC §60.9, Error)** An `<api>` declaration has no `base=` attribute. `base=` is required; it is the root URL prefix for all endpoints in this block. Fired by `parseApiDecl` [ast-builder.js:13638] when the opener carries no `base` attr. Fatal. |
 | E-API-RESPONSE-TYPE-UNDECLARED | 1 | **(S210 A2 NEW — SPEC §60.9, Error)** A complete `<api>` endpoint (`METHOD /path`) omits its `-> ResponseType` return annotation. Every endpoint must declare its response shape for type-system integration. Fired at the endpoint-body line parse [ast-builder.js:13723]. Fatal. |
 | E-API-METHOD-INVALID | 1 | **(S210 A2 NEW — SPEC §60.9, Error)** An `<api>` endpoint declares an HTTP method not in the recognized set (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS). Fired at two sites: method-field parse [:13733] and method-attr parse [:13777] in `parseApiDecl`. Fatal. |
+| E-API-PATH-PARAM-UNBOUND | 1 | **(S211 A2 W3 NEW — SPEC §60.2, Error)** An `<api>` endpoint path template contains a `${param}` parameter that is not declared as a field on the endpoint's `RequestType` struct. Per §60.2 every path-template parameter must name a field on the request struct. Fired by `checkApiDeclarations` Pass 2 [type-system.ts:18185]. Fatal. |
+| E-API-ENDPOINT-UNKNOWN | 1 | **(S211 A2 W3 NEW — SPEC §60.4, Error)** A `<request api="X">` usage names an endpoint `X` that has no matching `<api>` declaration in the in-scope endpoint registry. Per §60.4 `api="endpointName"` SHALL resolve against a declared `<api>` endpoint. Fired by `checkApiDeclarations` Pass 2 [type-system.ts:18283]. Fatal. |
+| E-API-REQ-SHAPE-MISMATCH | 1 | **(S211 A2 W3 NEW — SPEC §60.4, Error)** A `<request api="X" args=V>` usage whose `args` value is missing required fields from the endpoint's declared `RequestType` struct. Per §60.4 the `args` value must supply all required fields. Width-subtype check: EXTRA fields in `args` are allowed; only MISSING required fields fire this code. Fired by `checkApiDeclarations` Pass 2 [type-system.ts:18314]. Fatal. |
 | E-API-ENDPOINT-MALFORMED | 1 | **(S210 A2 NEW — SPEC §60.9, Error)** A body line inside `<api>` does not match the `METHOD /path -> ResponseType` endpoint-declaration form. Fired when a non-blank, non-comment body line fails all endpoint patterns [ast-builder.js:13757]. Fatal. |
 | E-AUTH-* | ~8 | Auth graph + role resolution errors |
 | E-AUTH-GRAPH-* | 4 | Auth graph structural errors (E-AUTH-GRAPH-001..004) |
@@ -106,6 +109,7 @@ code: string; message: string; span: CGSpan | object; severity: 'error' | 'warni
 | E-VALIDATOR-* | ~6 | Validator circular-dep / inline-dynamic / inline-colon |
 | E-VALIDATOR-INLINE-COLON | 1 | **(S185 NEW — SPEC §55.10 / §41.12 / §34, Error)** The inline message override on a validator uses the COLON form (`<name req:"…msg…">`, `<name length(>=2):"…msg…">`) — NOT valid scrml. The §55.10-normative Level-1 inline override is the PAREN form: a trailing string-literal ARG inside the validator parens (`<name req("…msg…")>`, `<name length(>=2, "…msg…")>`). The colon-after-validator collides with the decl scanner `:`-handling (typed-cell annotation / §4.14 colon-shorthand) and silently corrupted state-cell `@`-access registration pre-fix (the cell then mis-reported as undeclared via a MISLEADING E-SCOPE-001). Fired from `tryRecoverColonInlineMessage(afterValidatorIdx)` [ast-builder.js NEW helper, inside `scanStructuralDeclLookahead`] — detects a validator-name + `:`-string inside the opener; pushes E-VALIDATOR-INLINE-COLON naming the paren form as the fix AND RECOVERS by registering the cell with the message as the paren-form inline override (so this is the ONLY diagnostic on the decl — the spurious E-SCOPE-001 no longer cascades). Two call sites: post-call-arg path [recoveredCall] + bare-validator path [recoveredBare]. Fix-it: move the message inside the validator parens — `req("…msg…")` not `req:"…msg…"`. Fatal. `a4726dd3`. |
 | E-WRITE-NOT-IN-LOGIC-CONTEXT | 1 | Write attempt outside logic context |
+| W-INTERP-IN-RAW-CONTENT | 1 | **(S211 ss11 NEW — SPEC §4.17, Info)** A scrml-significant token (`${...}` interpolation, `<TagName>` component-ref opener, or a brace-sigil `?{`/`#{`/`!{`/`^{`/`_{`) appears LITERALLY inside a raw-content `<pre>` or `<code>` body. Per §4.17, those bodies are a single raw text run — the token is NOT interpolated/parsed and ships to the page LITERALLY (CORRECT by §4.17). The lint closes the SILENCE on this class: an author writing `<pre>${board}</pre>` ships the broken literal with zero diagnostic (Flux dog-food, S193). Detection: conservative `detectToken` — (1) `${...}` requires both `${` AND a `}` after it (lone `${` without close is NOT flagged); (2) `<[A-Z]` component-ref opener (bare `<` then lowercase/`/`/whitespace NOT flagged — those are real HTML); (3) one of the five brace-sigil openers. `walkRawContent` scans the BS AST for `{type:"markup", name in {"pre","code"}}` with a lowercase-first name (excludes PascalCase component refs). Fired by `runWInterpInRawContent(bsResults)` [lint-w-interp-in-raw-content.js], invoked at api.js Stage 2.5 after the BS loop; pushed through `collectErrors` so `W-`+`severity:"info"` routes into `result.warnings` (non-fatal; CLI exit 0). Message steers to `<div class='whitespace-pre'>${...}</div>` or explicit escaping. Info → result.warnings. |
 | W-ASSIGN-* | 1 | Assignment warnings |
 | W-ATTR-* | 2 | Attribute warnings |
 | W-AUTH-* | 5 | Auth warnings: W-AUTH-001 (server @var no detected initial load, §52.11 — **S194: now SUPPRESSED for a Tier-1 server-authority instance carrying `serverAuthorityTable`, since its SELECT * load is compiler-generated** [type-system.ts:9042, gate :9037-9040]), **W-AUTH-002 (S194 NEW/NARROWED — §52.8 SSR residual: a `authority="server" table=` state type now gets its SELECT * initial load on mount, but is NOT yet SSR pre-rendered — instances load client-side after first paint, a brief placeholder flash; SSR pre-render is a tracked follow-on. The persist WRITE is the dev's own `?{}` (§52.6.2). [type-system.ts:7972], severity warning -> result.warnings)**, W-AUTH-LOGIN-MISSING [auth-graph.ts], W-AUTH-PAGE-INFERRED [auth-graph.ts], W-AUTH-RUNTIME-FALLBACK [reachability/component-4.ts] |
@@ -138,6 +142,29 @@ code: string; message: string; span: CGSpan | object; severity: 'error' | 'warni
 | I-FN-PROMOTABLE | 1 | Info: function eligible for promotion; **S179:  now skips functions whose inferred boundary is server (RI escalated them without the  keyword — promoting them to  would silently strip server semantics).  set threaded from api.js into  [lint-i-fn-promotable.js:252-263].** |
 | I-MATCH-PROMOTABLE | 1 | Info: match eligible for engine promotion (§56) |
 | I-PARSER-NATIVE-SHADOW | 1 | Info: native parser shadows live-pipeline result |
+
+## Key New / Changed Codes Since Watermark 0a605d3e (S211)
+
+### S211 ss11 item 1 — W-INTERP-IN-RAW-CONTENT (commit `db5d91b6`)
+
+| Code | Severity | §34 section | Fire site |
+|------|----------|------------|-----------|
+| W-INTERP-IN-RAW-CONTENT | Info | §4.17 | lint-w-interp-in-raw-content.js:runWInterpInRawContent; wired api.js Stage 2.5 |
+
+Info → result.warnings (non-fatal). New module: compiler/src/lint-w-interp-in-raw-content.js (207L).
+
+### S211 A2 W3 — 3 NEW §34 typer codes (commit `612f92e6`)
+
+| Code | Severity | §34 section | Fire site |
+|------|----------|------------|-----------|
+| E-API-PATH-PARAM-UNBOUND | Error | §60.2 | type-system.ts:18185 |
+| E-API-ENDPOINT-UNKNOWN | Error | §60.4 | type-system.ts:18283 |
+| E-API-REQ-SHAPE-MISMATCH | Error | §60.4 | type-system.ts:18314 |
+
+All three fire from `checkApiDeclarations` in the TS type pass. All are fatal. Wired at
+[type-system.ts:18898-18914]. No W-/I- sibling codes (every api-decl type mismatch is an error).
+ss11 item 7 (44 examples/samples canonical-form rewrites) and ss7 emit-logic.ts reflect().variants
+tweak (+4L) carry ZERO new diagnostic codes.
 
 ## Key New / Changed Codes Since Watermark c665714c (S154-S160)
 
