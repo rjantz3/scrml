@@ -1,9 +1,9 @@
-<!-- @digest head=2a8e969f delta-seq=7 -->
+<!-- @digest head=6d8a47ab delta-seq=10 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `2a8e969f`** + delta-log **[7]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `2a8e969f`
+> **HEAD `6d8a47ab`** + delta-log **[10]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `6d8a47ab`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,23 +13,23 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `2a8e969f`
-- **HIGH 0** · MED 10 · LOW 15 · Nominal 8
+## Board — from `@gap` tokens @ `6d8a47ab`
+- **HIGH 0** · MED 10 · LOW 14 · Nominal 8
 - Named open HIGHs: _none_
 
 ## Recent rulings — last 0 `rule` (delta-log S211 — 2026-06-20)
 - _(none in the latest session)_
 
 ## Recent activity — last 6 `disp`/`land`/`find`/`state`
-- `[2]` land · **A2 W3 (typer) LANDED + PUSHED `612f92e6`** (origin 0a605d3e..612f92e6; pre-push full-suite + TodoMVC PASS). S67 file-delta (agent a80f17c2cb0c3c4bc @2ff87850)… → 612f92e6
-- `[3]` disp · **A2 W4 (codegen) DISPATCHED** (user "fire W4"). scrml-js-codegen-engineer, isolation:worktree, opus, agent **adc513f2f54817b2d**, base 612f92e6. Scope: per-end… → BRIEF-W4.md + agent adc513f2f54817b2d
-- `[4]` state · **S205 merge-before-push gate MISS (self-caught, benign) + DEPUTY ACTIVE (contra S210 hand-off).** deputy-maint advanced 0→2 during S211 (fdc20cd7 S210-wrap map… → deputy-maint 82d9a486
 - `[5]` find · **sPA ss7 (meta-reflect-l22) RE-INTEGRATION received** (inbox). Branch spa/ss7 tip 7927fb40 (base origin/main 0a605d3e, 0/2, clean). item1 g-reflect-variant-sha… → spa/ss7 + ss7 inbox msg
 - `[6]` disp/land · **sPA ss7 (meta-reflect-l22) RE-INTEGRATED + PUSHED `f97a5fba`** (user "ss7 complete"). S67 file-delta (tip 7927fb40==reported, S83-verified, clobber-safe — 0 m… → f97a5fba + known-gaps
 - `[7]` state · **ss11 ALSO in-flight** (worktree-list discovery): spa/ss11 advanced 0a605d3e→c2211661 — user fired it (doc-currency-corpus, fattest list) in parallel; awaiting… → worktree-list
+- `[8]` disp/land · **sPA ss11 (doc-currency-corpus, 64-file) RE-INTEGRATED** (user "ss11 is done"). `git merge --no-ff spa/ss11` → main 238f07d2 (tip 7912e301==reported, S83-verif… → 238f07d2 + allowlist
+- `[9]` find · **W4 (codegen) CRASHED mid-run** (agent adc513f2 — socket FailedToOpenSocket, environmental/S187). Got ~90%: committed typer-prep 0380ec96 (type-system.ts respo… → SALVAGE diff + 0380ec96
+- `[10]` state · **ss11 escalations PARKED (5).** #1 compiler-bug batch — built-in scope-resolver E-SCOPE-001 (navigate/animationFrame/cleanup/transaction) + anon fn(x){} expr +… → docs/changes/phase-b2-samples-curate/
 
 ## State
-- Version: 0.7.0 · maps: 8 commits behind HEAD (watermark 0a605d3e, HEAD 2a8e969f)
+- Version: 0.7.0 · maps: 21 commits behind HEAD (watermark 0a605d3e, HEAD 6d8a47ab)
 - Recent wraps:
   - 0a605d3e chore(s210): wrap-finalize — recent-sessions + digest regen at settled HEAD 4a67f5bb
   - 28de9c81 wrap(s209): close — crash-recovered; despace arc + 7-sPA wave + cPA correction + B/C; ss4/ss13/DD-verdict to next PA
