@@ -62,3 +62,37 @@ items — each verified empirically (R26 reproduce-first) before any dispatch.
 - Current state (roadmap S170): native parser BUILT (M1-M4 + MK1-MK4); flip-failures 1,150 (S161) → ~508 (S170 W2), 0 true regressions; #2f each/match/colon-shorthand DONE (S162). Remaining flip-failure buckets: MISSING-FIELD emit-shape ~296 (dominant) · engine-statechild ~116 · FIELD-SHAPE-other ~21 · each-match residual ~11 · legacy-stage-probe ~14-18 — each a substantial per-milestone native-parser dispatch the PA should sequence.
 - Authority: `scrml-support/docs/deep-dives/scrml-native-parser-front-end-charter-2026-05-20.md` + `m6-joint-retirement-cutover-plan-2026-05-23.md`.
 - Disposition: **PARKED — escalated to PA.**
+
+---
+
+# sPA ss4 — S211 run (S210-rebuilt 3-item list)
+
+Branch `spa/ss4` re-created from local main `3d311fc9` (ahead of origin/main `8dba968e`).
+node_modules + compiler/node_modules + compilation-tests/dist symlinked from main.
+Note: main advanced 3d311fc9→8569f774 concurrently during this run (PA/deputy ticks 154/155/163
++ match-arm codegen fix 93e02b35 + deputy-maint merge). All 3 ss4-touched files verified disjoint
+from that advance → PA re-integration merge will be clean.
+
+## item 1 — g-block-match-in-lift-misparsed-as-components → PARKED (user ruling)
+- R26 reproduced on HEAD 3d311fc9: block `<match>` inside `${ for (let r of @rows) { lift <li><match for=Status on=r.st><Open>…</Open><Closed>…</Closed></match></li> } }` fails with `E-COMPONENT-035` on `Open`+`Closed` (arms fall to the uppercase-tag→component path). SAME block `<match>` inside `<each>` compiles clean.
+- Root: the `lift`-body re-parse (`liftBareDeclarations`) does NOT route `<match>` through the S107 match-block recognition that the `<each>` body path uses.
+- Fix-shape fork (brief-seed reserved "PA picks"): (a) support block-`<match>` in `${…lift}` (parity with `<each>`) vs (b) targeted diagnostic 'use `<each>`'. Language-capability ruling → sPA escalates, does not decide.
+- **User ruling (S211): PARK — escalate to PA/dPA.** No code change. Surfaced in the re-integration message.
+
+## item 2 — native-parser-lexer-3-residuals → LANDED 3cd58aa4
+- Dispatched scrml-js-codegen-engineer (worktree-agent-adbf6a5d306b8f9cd, d46da4b0).
+- FINDING (contradicts S209/S210 framing): the 3 residuals (decl-class, expr-optional-chain, expr-template-literal) were **comparator-side fidelity gaps, NOT native-lexer bugs**. The native token stream already matched Acorn modulo documented intentional scrml-extension divergences.
+  - decl-class: `constructor` member name resolved to Object.prototype.constructor in the plain-object lookup tables (prototype pollution); added a `lookup()` own-property guard mirroring token.js makeIdentOrKeyword.
+  - expr-optional-chain: `?.fn?.()` — `fn` is a scrml HARD keyword (KwFn); added NATIVE_SCRML_KEYWORDS (verified == token.js:207-233) as an intentional divergence table.
+  - expr-template-literal: generalized the closing-backtick fold (was empty-trailer-only) + frames-stack for nested templates.
+- sPA verify (R26/R4): NATIVE_SCRML_KEYWORDS matched token.js exactly; `compareFull` assertion logic UNCHANGED (no gate-loosening); re-ran lexer conformance on spa/ss4 → 110 pass / 0 fail. Full gate (agent) 17535/0.
+- Only `compiler/tests/parser-conformance-lexer.test.js` changed (native-parser source untouched). S67 file-delta.
+- Disposition: **landed-on-branch `3cd58aa4`.**
+
+## item 3 — g-block-analysis-fn-span-overshoot → LANDED 05df4c48
+- R26 reproduced: every local fn-decl inside a `${…}` logic body had span.end = END of the NEXT token; block-analysis endLine landed on the next fn's opener (all 11 adjacent pairs in messages.scrml shared a boundary line).
+- Root: `parseRecursiveBody()` consumes the closing `}`, then function-decl nodes used `span: spanOf(startTok, peek())` (peek() = token after `}`). Fix = `peek(-1)` (the consumed `}`).
+- Dispatched scrml-js-codegen-engineer (worktree-agent-a487f5b55264d6938, b98290cf). **Brief line-number correction (agent catch):** the brief named the 2 NESTED handler sites (~7870/8120); the messages.scrml repro fns are TOP-LEVEL, parsed by the MAIN-LOOP sites (~10817/11035). Agent verified empirically + fixed ALL 4 function-decl sites (R3). Export-form site (precomputed span) + ~40 non-fn decl sites left untouched (scope guard).
+- sPA verify: ast-builder.js delta = exactly the 4 `peek(-1)` lines; all 3 ss4 files disjoint from main's concurrent advance (clean file-delta). +3 non-vacuous regression tests (real BS+AST path). Full gate (agent) 17538/0; no locked expectations corrected.
+- SYSTEMIC FINDING (out of scope, flagged for PA): the same overshoot affects ~40 other logic-body decl sites (let/const/state/lin/bare-expr); only fns surface because block-analysis projects only named blocks.
+- Disposition: **landed-on-branch `05df4c48`.**
