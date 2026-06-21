@@ -55,9 +55,12 @@
  *   W-CG-UNDEFINED-INTERPOLATION          =  0   (was 53; S93 codegen leak fixes)
  *   --- aggregate ---
  *   errors:    0
- *   warnings:  74   (80 pre-ss1; ss1 dropped 6 W-SERVER-IMPORT-UNEMITTED by emitting
- *                       pure-module value exports into .server.js. was 67 @ S98,
- *                       87 pre-S98 — 20 page-file false-positives suppressed)
+ *   warnings:  77   (74 pre-ss11; ss11 item 1 added 3 W-INTERP-IN-RAW-CONTENT for
+ *                       `${...}` interpolations authored inside `<code>` raw-content
+ *                       bodies, SPEC §4.17. 80 pre-ss1; ss1 dropped 6
+ *                       W-SERVER-IMPORT-UNEMITTED by emitting pure-module value
+ *                       exports into .server.js. was 67 @ S98, 87 pre-S98 — 20
+ *                       page-file false-positives suppressed)
  *   chunks:    >= 1 (per-route)
  *   manifest entryPoints: >= 1
  *
@@ -341,6 +344,17 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
     // (info; the hydration mechanism works regardless — the cell IS server-owned).
     // Aggregate 73 -> 74.
     "W-ENGINE-SERVER-SOURCE-NOT-AUTHORITATIVE": 1,
+    // g-interp-in-raw-content (ss11 item 1, SPEC §4.17): the new
+    // W-INTERP-IN-RAW-CONTENT info-lint fires on the three `${...}` interpolations
+    // authored inside `<code>` raw-content bodies — these ship the LITERAL
+    // `${...}` text to the page (the §4.17 raw-pass-through), so the lint nudges
+    // toward a non-raw wrapper. Real sites:
+    //   - pages/customer/profile.scrml L117  `<code ...>${@currentUser.email}</code>`
+    //   - pages/driver/messages.scrml  L233  `<code ...>${@channelId}</code>`
+    //   - pages/driver/profile.scrml   L177  `<code ...>${@currentUser.email}</code>`
+    // Info-level (severity:info, W- prefix) — partitions into result.warnings,
+    // exit stays 0. Aggregate 74 -> 77.
+    "W-INTERP-IN-RAW-CONTENT": 3,
     "W-PROGRAM-001": 4,
     "W-PROGRAM-REDUNDANT-LOGIC": 18,
     "W-SQL-ROW-UNTYPED": 6,
