@@ -424,6 +424,20 @@ function emitArmWireFunction(
            typeof b.renderHeldAccessor === "string",
   );
 
+  // g-match-arm-reactive-attr-effects (S212) — class:/attr-tpl directives tagged
+  // with THIS arm context. emit-html.ts registered these (with the lowered JS
+  // expr + reactive refs) when it emitted the placeholder inside the arm body;
+  // the top-level emit-bindings.ts pass never reaches arm bodies, so without
+  // this per-mount re-wire the placeholder is a dead binding. Each directive's
+  // `_scrml_effect` is push()'d onto `_disposers` so it is torn down on the next
+  // variant change (the arm subtree is replaced via innerHTML — its cached
+  // element handle goes stale, so the prior effect must stop firing).
+  const wireableDirectives = logicBindings.filter(
+    (b) => (b.kind === "class-directive" || b.kind === "attr-template") &&
+           typeof b.directiveSelector === "string" &&
+           typeof b.directiveJsExpr === "string",
+  );
+
   // B1 (§51.0.B.1) — payload bindings as wire-fn parameters. The dispatcher
   // passes `_data[fieldName]` positionals after `_root`, matching the
   // render-fn signature shape. Bindings are then in scope throughout the
@@ -435,7 +449,10 @@ function emitArmWireFunction(
   const wireParams = ["_root", ...payloadBindings].join(", ");
 
   // No bindings to wire → no-op shell so the dispatcher branch stays uniform.
-  if (wireableLogic.length === 0 && wireableEvents.length === 0 && wireableRenders.length === 0) {
+  if (
+    wireableLogic.length === 0 && wireableEvents.length === 0 &&
+    wireableRenders.length === 0 && wireableDirectives.length === 0
+  ) {
     return `function ${wireFnName}(${wireParams}) { return function() {}; }`;
   }
 
@@ -509,6 +526,39 @@ function emitArmWireFunction(
       lines.push(`        case ${JSON.stringify(vName)}: el.innerHTML = (${vExpr}); break;`);
     }
     lines.push(`      }`);
+    lines.push(`    }`);
+    lines.push(`  }`);
+  }
+
+  // ---- class:/attr-tpl directives: classList.toggle / setAttribute + effect ----
+  // g-match-arm-reactive-attr-effects (S212). The lowered JS expression + reactive
+  // refs were computed at placeholder-emission time (emit-html.ts) using the SAME
+  // helpers the top-level emit-bindings.ts path uses, so the runtime shape matches
+  // the OUTSIDE-arm wiring exactly — only the element lookup (`_root.querySelector`
+  // vs `document.querySelector`) and the effect-disposal differ. The effect handle
+  // is pushed onto `_disposers` so a subsequent variant change tears it down.
+  for (const binding of wireableDirectives) {
+    const selector = binding.directiveSelector as string;
+    const jsExpr = binding.directiveJsExpr as string;
+    const refs = (binding.directiveRefs ?? []) as string[];
+    lines.push(`  {`);
+    lines.push(`    const el = _root.querySelector(${JSON.stringify(selector)});`);
+    lines.push(`    if (el) {`);
+    if (binding.kind === "class-directive") {
+      const className = binding.className as string;
+      // Apply once at mount, then (when reactive) subscribe via _scrml_effect.
+      lines.push(`      el.classList.toggle(${JSON.stringify(className)}, !!(${jsExpr}));`);
+      if (refs.length > 0) {
+        lines.push(`      _disposers.push(_scrml_effect(function() { el.classList.toggle(${JSON.stringify(className)}, !!(${jsExpr})); }));`);
+      }
+    } else {
+      // attr-template — set the interpolated attribute value once, then subscribe.
+      const attrName = binding.attrName as string;
+      lines.push(`      el.setAttribute(${JSON.stringify(attrName)}, ${jsExpr});`);
+      if (refs.length > 0) {
+        lines.push(`      _disposers.push(_scrml_effect(function() { el.setAttribute(${JSON.stringify(attrName)}, ${jsExpr}); }));`);
+      }
+    }
     lines.push(`    }`);
     lines.push(`  }`);
   }

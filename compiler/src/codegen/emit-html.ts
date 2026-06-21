@@ -20,7 +20,7 @@ import { lookupStateCell, lookupQualifiedStateCell, lookupCompoundMembersByLeafN
 import { parsePredicateAnnotation, deriveHtmlAttrs } from "./emit-predicates.ts";
 // A1c C16 — `buildReactiveTypeMap` walks the file AST for `state-decl` typeAnnotations
 // keyed by var-name (mirrors emit-bindings.ts §53.7.2 path for runtime gating).
-import { buildReactiveTypeMap } from "./emit-bindings.ts";
+import { buildReactiveTypeMap, lowerClassDirectiveCondition, lowerAttrTemplateValue } from "./emit-bindings.ts";
 // errorBoundary (SPEC §19.6 + §19.6.8) — markup-context error catch support.
 // `collectEnumRenders` builds the file's variant -> renders-markup map;
 // `compileBoundaryMarkup` + `emitBoundaryMarkupExpr` lower fallback / renders
@@ -1825,8 +1825,30 @@ export function generateHtml(
 
         if (name.startsWith("class:")) {
           const classBindId = genVar(`class_${name.replace(":", "_")}`);
-          parts.push(` data-scrml-${name.replace(":", "-")}="${classBindId}"`);
+          const classDataAttr = `data-scrml-${name.replace(":", "-")}`;
+          parts.push(` ${classDataAttr}="${classBindId}"`);
           if (!attr._bindId) attr._bindId = classBindId;
+          // g-match-arm-reactive-attr-effects (S212) — when this class: directive
+          // sits inside a `<match>` arm body, the top-level emit-bindings.ts pass
+          // (which walks collectMarkupNodes) never reaches it, so its `_scrml_effect`
+          // is never wired. Register an arm-tagged class-directive binding so
+          // emit-variant-guard.ts:emitArmWireFunction re-emits the toggle + effect
+          // per-mount against the arm `_root`. The top-level path is unchanged.
+          if (registry && registry.currentArmContext != null && liveCtx) {
+            const lowered = lowerClassDirectiveCondition(val as any, {
+              derivedNames: liveCtx.derivedNames,
+              synthCellKeys: liveCtx.synthCellKeys,
+            });
+            if (lowered) {
+              registry.addLogicBinding({
+                kind: "class-directive",
+                directiveSelector: `[${classDataAttr}="${classBindId}"]`,
+                className: name.slice("class:".length),
+                directiveJsExpr: lowered.jsExpr,
+                directiveRefs: lowered.refs,
+              });
+            }
+          }
           continue;
         }
 
@@ -1843,6 +1865,21 @@ export function generateHtml(
             const tplId = genVar(`attr_tpl_${name}`);
             parts.push(` ${name}="" data-scrml-attr-tpl-${name}="${tplId}"`);
             if (!attr._tplId) attr._tplId = tplId;
+            // g-match-arm-reactive-attr-effects (S212) — same gap as class:.
+            // A reactive `style="...${@x}..."` (or any interpolated attr value)
+            // inside a `<match>` arm body gets its `data-scrml-attr-tpl-*`
+            // placeholder but no `_scrml_effect`. Register an arm-tagged
+            // attr-template binding so emitArmWireFunction wires it per-mount.
+            if (registry && registry.currentArmContext != null) {
+              const lowered = lowerAttrTemplateValue(String(val.value ?? ""));
+              registry.addLogicBinding({
+                kind: "attr-template",
+                directiveSelector: `[data-scrml-attr-tpl-${name}="${tplId}"]`,
+                attrName: name,
+                directiveJsExpr: lowered.jsExpr,
+                directiveRefs: lowered.refs,
+              });
+            }
           } else {
             parts.push(` ${name}="${escapeHtmlAttr(val.value)}"`);
           }

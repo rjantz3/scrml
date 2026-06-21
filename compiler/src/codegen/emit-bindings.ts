@@ -313,6 +313,99 @@ function dispatchByRenderSpec(tag: string, attrs: any[]): BindDispatch {
  * @param params.fileAST — the file AST to generate wiring for
  * @returns JS lines to append to the client module
  */
+
+/**
+ * Lowered `class:` directive condition — shared between the top-level wiring
+ * path (this module, `document.querySelector`) and the `<match>` arm wire
+ * function (emit-variant-guard.ts, `_root.querySelector`).
+ *
+ * `jsExpr` is the boolean condition (already `_scrml_reactive_get(...)`-lowered).
+ * `refs` are the reactive cell names it depends on (sans `@`); when empty the
+ * caller toggles the class once at mount with no `_scrml_effect`.
+ *
+ * Mirrors the four §5.5.2 RHS forms handled inline in `emitBindings`:
+ *   1. variable-ref @var   2. variable-ref obj.path
+ *   3. expr (paren bool)   4. call-ref fn(...)
+ */
+export interface LoweredDirective {
+  jsExpr: string;
+  refs: string[];
+}
+
+export function lowerClassDirectiveCondition(
+  attrValue: AttrValue,
+  ctx: { derivedNames?: Set<string>; synthCellKeys?: Set<string> },
+): LoweredDirective | null {
+  if (!attrValue) return null;
+  if (attrValue.kind === "variable-ref") {
+    const rawName = (attrValue.name ?? "") as string;
+    if (rawName.startsWith("@")) {
+      // Form 1: class:active=@isActive
+      const cVarName = rawName.replace(/^@/, "");
+      return { jsExpr: `_scrml_reactive_get(${JSON.stringify(cVarName)})`, refs: [cVarName] };
+    }
+    // Form 2: class:done=todo.completed — subscribe to the root reactive key.
+    const dotIndex = rawName.indexOf(".");
+    const rootKey = dotIndex !== -1 ? rawName.slice(0, dotIndex) : rawName;
+    const pathStr = dotIndex !== -1 ? rawName.slice(dotIndex) : "";
+    const readExpr = pathStr
+      ? `_scrml_reactive_get(${JSON.stringify(rootKey)})${pathStr}`
+      : `_scrml_reactive_get(${JSON.stringify(rootKey)})`;
+    return { jsExpr: readExpr, refs: [rootKey] };
+  }
+  if (attrValue.kind === "expr") {
+    // Form 3: class:active=(@view == .Home) — variant-aware ExprNode lowering.
+    const rawExpr = (attrValue.raw ?? "") as string;
+    const exprRefs = (attrValue.refs ?? []) as string[];
+    let exprNode = (attrValue.exprNode ?? null) as ExprNode | null;
+    if (!exprNode && rawExpr) {
+      try {
+        exprNode = parseExprToNode(rawExpr, "<class-directive>", 0) as ExprNode | null;
+      } catch {
+        exprNode = null;
+      }
+    }
+    const rewrittenExpr = emitExprField(exprNode, rawExpr, {
+      mode: "client",
+      derivedNames: ctx.derivedNames,
+      synthCellKeys: ctx.synthCellKeys,
+    }) as string;
+    return { jsExpr: rewrittenExpr, refs: exprRefs };
+  }
+  if (attrValue.kind === "call-ref") {
+    // Form 4: class:active=isComplete() — serialize + rewrite @var args.
+    const fnName = (attrValue.name ?? "") as string;
+    const fnArgs = (attrValue.args ?? []) as string[];
+    const rawArgs = fnArgs.join(", ");
+    const callExpr = rawArgs ? `${fnName}(${rawArgs})` : `${fnName}()`;
+    const rewrittenCall = rewriteReactiveRefs(callExpr) as string;
+    const callRefs: string[] = [];
+    const refRe = /@([A-Za-z_$][A-Za-z0-9_$]*)/g;
+    let refMatch: RegExpExecArray | null;
+    while ((refMatch = refRe.exec(rawArgs)) !== null) {
+      if (!callRefs.includes(refMatch[1])) callRefs.push(refMatch[1]);
+    }
+    return { jsExpr: rewrittenCall, refs: callRefs };
+  }
+  return null;
+}
+
+/**
+ * Lowered `attr-template` directive — the template-literal attribute value
+ * (`style="transform: translateX(${@x}px)"`). Shared between the top-level
+ * wiring path and the `<match>` arm wire function.
+ *
+ * `jsExpr` is the JS template-literal string; `refs` are the reactive cell
+ * names it interpolates (sans `@`); empty refs → set once at mount.
+ */
+export function lowerAttrTemplateValue(rawValue: string): LoweredDirective {
+  const { jsExpr, reactiveVars } = rewriteTemplateAttrValue(rawValue) as {
+    jsExpr: string;
+    reactiveVars: Set<string>;
+  };
+  return { jsExpr, refs: Array.from(reactiveVars) };
+}
+
 export function emitBindings(ctx: CompileContext): string[] {
   const { fileAST, encodingCtx } = ctx;
   const lines: string[] = [];

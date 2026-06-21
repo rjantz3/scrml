@@ -317,6 +317,13 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
     // top-level `<render of=@cell/>` has no `engineArm` and is handled by the
     // global path below.
     if (b.kind === "render-element") return false;
+    // g-match-arm-reactive-attr-effects (S212) — an arm-tagged class:/attr-tpl
+    // directive binding is re-emitted PER-ARM by emit-variant-guard.ts against
+    // the arm `_root` (the directive's element is created fresh on each variant
+    // innerHTML replace, so a module-init `document.querySelector` would cache a
+    // detached/absent node). These bindings are registered by emit-html.ts ONLY
+    // when in an arm context, so skipping them from global emission is correct.
+    if (b.kind === "class-directive" || b.kind === "attr-template") return false;
     // Default reactive-text binding (kind === undefined) AND not a
     // conditional-display / mount-toggle / visibility variant → handled
     // per-arm. All other kinds remain in global emission (v1 limitation

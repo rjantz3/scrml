@@ -114,7 +114,7 @@ export interface LogicBinding {
    * arrow-function expression. emit-event-wiring consumes and emits subscribe +
    * per-iteration render.
    */
-  kind?: "if-chain-branch" | "if-chain-else" | "render-by-tag" | "errors-element" | "render-element";
+  kind?: "if-chain-branch" | "if-chain-else" | "render-by-tag" | "errors-element" | "render-element" | "class-directive" | "attr-template";
 
   // Conventional reactive / conditional binding fields.
   // Required for `kind === undefined` bindings (the default).
@@ -272,6 +272,39 @@ export interface LogicBinding {
   renderHeldAccessor?: string;
   renderHeldSubscribe?: string;
   renderVariantExprs?: Record<string, string>;
+
+  /**
+   * g-match-arm-reactive-attr-effects (S212) — class:/attr-template directive
+   * fields, registered ONLY when the directive sits inside a `<match>` arm body
+   * (the registry has an active arm context). Required when
+   * `kind === "class-directive"` or `kind === "attr-template"`.
+   *
+   * The top-level (non-arm) path wires these directly from the markup AST in
+   * emit-bindings.ts (via collectMarkupNodes). collectMarkupNodes never descends
+   * into match arm bodies (they live in armsRaw/bodyChildren, not node.children),
+   * so an arm-body class:/attr-tpl placeholder was emitted into the arm-render
+   * HTML string with NO `_scrml_effect` to resolve it — a dead binding. These
+   * fields let emitArmWireFunction (emit-variant-guard.ts) re-emit the same
+   * `_scrml_effect` wiring per-mount against the arm `_root`, mirroring how the
+   * text-logic / event bindings are re-wired on variant change.
+   *
+   *   directiveSelector — the `[data-scrml-...="<id>"]` querySelector the wire fn
+   *                       runs against `_root` to find the directive's element.
+   *   className         — for `class-directive`: the class name to toggle.
+   *   attrName          — for `attr-template`: the attribute name to set.
+   *   directiveJsExpr   — the lowered JS expression (already
+   *                       `_scrml_reactive_get(...)`-rewritten). class-directive:
+   *                       the boolean condition. attr-template: the template
+   *                       literal producing the attribute string value.
+   *   directiveRefs     — reactive cell names referenced by directiveJsExpr (sans
+   *                       `@`). Non-empty → emit the `_scrml_effect`; empty →
+   *                       apply once at mount (no reactive subscription).
+   */
+  directiveSelector?: string;
+  className?: string;
+  attrName?: string;
+  directiveJsExpr?: string;
+  directiveRefs?: string[];
 
   /**
    * Phase A10 (S78, 2026-05-10) — engine arm context tag.
