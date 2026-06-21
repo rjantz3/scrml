@@ -156,6 +156,92 @@ describe("buildBlockAnalysisForFile — source order", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// ss4-item3 (2026-06-21) — function-decl span MUST NOT overshoot.
+//
+// REGRESSION: parseLogicBody's function-decl handlers built their span as
+// `spanOf(startTok, peek())`, but `parseRecursiveBody()` had already CONSUMED
+// the closing `}`, so `peek()` was the NEXT decl's opener token. Each fn's
+// `span.end` therefore landed on the FOLLOWING function's opening line, so
+// `block-analysis.projectSpan` derived an `endLine` equal to the next fn's
+// `line` — adjacent functions shared a boundary line, breaking flogence's
+// block-lease / dock per-block spans.
+//
+// Drives the REAL `splitBlocks → buildAST → buildBlockAnalysisForFile` path
+// (R26/S138 — a synthetic AST would MISS this upstream parser bug). The fixture
+// holds ≥3 ADJACENT local functions in a `${…}` logic body (both `function`
+// and `fn` forms, since the bug had distinct creation sites per fnKind).
+// ---------------------------------------------------------------------------
+
+// Each fn's body is laid out so its OWN closing `}` is on a known line. Line
+// numbers are 1-based; line 1 is `${`. Adjacent fns are separated by ONE blank
+// line so a boundary-overshoot would be unambiguous (endLine == next fn line).
+const ADJACENT_FNS_SRC = `\${
+  function alpha(a) {
+    return a + 1
+  }
+
+  function beta(b) {
+    @counter = b
+    return @counter
+  }
+
+  fn gamma(c) {
+    return c * 2
+  }
+
+  fn delta(d) {
+    return d
+  }
+}
+
+<page>
+  <h1>spans</h1>
+</page>`;
+
+describe("buildBlockAnalysisForFile — function-decl span does not overshoot (ss4-item3)", () => {
+  // Compute, from the fixture source, the 1-based line of each fn's OWN closing
+  // `}` (the dedented `  }` that follows its opener). Drives the assertion off
+  // the literal source so it stays correct if the fixture is edited.
+  function expectedCloseLine(src, fnName) {
+    const lines = src.split("\n");
+    const openIdx = lines.findIndex((l) => l.includes(`function ${fnName}(`) || l.includes(`fn ${fnName}(`));
+    expect(openIdx).toBeGreaterThanOrEqual(0);
+    for (let i = openIdx + 1; i < lines.length; i++) {
+      if (lines[i] === "  }") return i + 1; // 1-based; the dedented closing brace
+    }
+    throw new Error(`no closing brace found for ${fnName}`);
+  }
+
+  function fnBlocks() {
+    const ba = buildBlockAnalysisForFile(
+      compileAST(ADJACENT_FNS_SRC, "/abs/examples/spans/page.scrml"),
+      ADJACENT_FNS_SRC,
+    );
+    return ba.blocks.filter((b) => b.kind === "function");
+  }
+
+  test("all four adjacent local functions are discovered (function + fn forms)", () => {
+    const names = fnBlocks().map((b) => b.name);
+    expect(names).toEqual(["alpha", "beta", "gamma", "delta"]);
+  });
+
+  test("no two adjacent function blocks share a boundary line (endLine < next fn's line)", () => {
+    const fns = fnBlocks();
+    for (let i = 0; i < fns.length - 1; i++) {
+      // Strictly LESS THAN: the closing `}` of fn[i] is on an earlier line than
+      // the opener of fn[i+1]. Equality is the overshoot symptom.
+      expect(fns[i].span.endLine).toBeLessThan(fns[i + 1].span.line);
+    }
+  });
+
+  test("each function's endLine is the source line of its OWN closing brace", () => {
+    for (const b of fnBlocks()) {
+      expect(b.span.endLine).toBe(expectedCloseLine(ADJACENT_FNS_SRC, b.name));
+    }
+  });
+});
+
 describe("buildBlockAnalysisForFile — footprint populated end-to-end (real D1)", () => {
   test("the function block's footprint is the REAL footprintForBlock output", () => {
     const ba = multiDefAnalysis();
