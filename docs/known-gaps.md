@@ -1609,7 +1609,8 @@ LOW-severity adopter bug filed by giti per S124 carry-forward. Details in `handO
 The `bun scrml promote --match` CLI shipped S66 (Tier-0→1 lift mechanical). The companion `--engine` flag (Tier-1→2 lift) is deferred — it pairs with `W-MATCH-TRANSITIONS-ACCRUING`, a sibling lint that needs its own §34 catalog + implementation groundwork. The CLI flag stays registered but prints a clear "deferred" message until that lands.
 
 - **Workaround:** manual conversion from `<match for=Type>` block-form to `<engine for=Type initial=.Variant>` — state-children carry forward verbatim; add `initial=` + per-arm `rule=`.
-- **Status:** deferred; queued post-W-MATCH-TRANSITIONS-ACCRUING.
+- **RULING B RATIFIED S210 (user "B").** **DROP `W-MATCH-TRANSITIONS-ACCRUING` as redundant** — it was name-only (SPEC §56.6 + promote.js:1542 stub; no §34 row, no fire-conditions) and OVERLAPS the SHIPPED `W-MATCH-RULE-INERT` (§18.0.2 / §34 / `lint.match-rule-inert`), which already fires on `rule=` on a `<match>` arm AND already recommends "promote to `<engine>` (Tier 2)." So bug-20 collapses from "4 pieces" to ~2: just the **`--engine` span-rewrite** (mostly specced §56.6/§3-line-161 + mechanical, mirrors shipped `--match`/`--each`; `initial=` = first arm's variant) **reusing the existing `W-MATCH-RULE-INERT` (opportunity surface) + the shipped `W-ENGINE-INITIAL-MISSING` (default-initial path)**. SPEC §56.6 to be amended to drop the W-MATCH-TRANSITIONS-ACCRUING reference when the rewrite lands. **READY small dispatch** (LOW; promote.js — fireable anytime; not yet fired).
+- **Status:** ruling B ratified; the `--engine` rewrite is a ready LOW dispatch (no new lint). Stays `open` until built.
 
 ---
 

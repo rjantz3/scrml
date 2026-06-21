@@ -1,50 +1,43 @@
-# scrml — Session 210 (OPEN)
+# scrml — Session 210 (CLOSE / wrapped)
 
-**Date:** 2026-06-20. **This session:** S210 (resumed across a `/clear` mid-session — NOT rotated; same OPEN S210). **Prev:** S209-CLOSE → `handOffs/hand-off-214.md`. **Profile:** A — FULL. **Deputy:** **ACTIVE** (`deputy-maint` ticking — at `45b9d049`, advancing through the session) → `^main` >0 → **merge-before-push gate (S205) at every push.**
+**Date:** 2026-06-20. **S210 wrapped** (full 8-step). **Profile:** A — FULL (ran end-to-end across a `/clear` continuation; never rotated mid-S210). **Next session rotates this → `handOffs/hand-off-<N>.md` + fresh.**
 
-> **Thinned hand-off (S205).** Mechanical state → `bun scripts/state.ts` + digest · `delta-log.md` [S210 1-20] · `deputy-state.md`. This carries the IRREDUCIBLE + the OPEN intake.
+> **Thinned hand-off (S205).** Mechanical state → `bun scripts/state.ts` + digest · `delta-log.md` [S210 1-33] · `deputy-state.md`. This carries the IRREDUCIBLE + the in-flight/ready intake.
 
-## Boot/current state
-- scrml + scrml-support **0/0 with origin** as of the last push (`c1c96ca1`); **ss3 + gap-reconcile committed locally on top, UNPUSHED** (HEAD past `2eea9d4e`).
-- Board **HIGH 1 · MED 11 · LOW 17 · Nominal 8** (HIGH = `g-paren-binary-group-dropped-before-method` flogence; +AF lint gap `g-input-state-markup-nonreactive-lint` LOW). Tests **17,384 / 68 skip / 0 fail** (subset) @ v0.7.0.
-- Maps behind HEAD — **deputy-owned + deputy active → left to deputy.**
-- `docs/graph/` (flograph projection) keeps getting staged **directly into main's index** (S119 hazard — a flograph/deputy tool, NOT via deputy-maint) → kept out of every PA commit via explicit pathspec. **Watch:** worth checking why the deputy/flograph writes main's index.
-- **Worktrees:** main · `../scrml-deputy-maint` (deputy, KEEP). (ss3 integrated + 6b-cleaned; stale `agent-a4e244bf…` already gone.)
+## ⚠️ DEPUTY IS IDLE — needs a fresh boot to monitor the in-flight
+`deputy-maint == main` (not ticking); **maps 49 commits behind HEAD** (watermark `5c68e87e`), digest was stale (PA-regen'd at wrap). The deputy fell behind — it is NOT currently monitoring. **To have the deputy monitor W3 + the 2 fired sPAs in the gap (user "deputy can monitor in between"), boot a fresh deputy** (`read vpa.md and boot`). Otherwise the next PA picks up the in-flight cold (safe — the delta-log + this hand-off carry it).
 
-## ✅ S210 — DONE
-- **3 HIGH bugs RESOLVED:** AD+regex (`14fb0230`) · AE engine-`name=` dual-table (`faa213c5`).
-- **sPA ss4** (`f65b1de9`) + **ss13** (`c3e9d16e`) + **ss3** (`2eea9d4e`, 3/3: g-attr-bare-compound-is-op, bug-18/GITI-015, @.-sigil expr-parser) integrated. **sPA lists REBUILT** (fattening rule).
-- **dpa-001 A2 RATIFIED** + **A2 build SCOPED** (`docs/changes/api-primitive-a2-2026-06-20/`) + **A2 W0 DD landed** (`scrml-support/docs/deep-dives/api-primitive-decl-site-epistemics-2026-06-20.md`).
-- **6nz 1624 reply** sent (AB closed @ `2ebd107a`; AA open; X/Y/Z/AC current). **giti GITI-015** + **flogence paren-bug** acks sent. Bookkeeping done (user-voice/changelog/state/inbox).
+## Close state
+- scrml + scrml-support **pushed, 0/0** at wrap (HEAD will advance with the wrap-finalize commit). Board **HIGH 0 · MED 9 · LOW 17 · Nominal 8.** Tests **17,487 / 68 skip / 0 fail** (subset) @ v0.7.0.
+- **Maps 49 behind** (deputy debt) — do NOT refresh until W3 lands (W3 changes type-system/ast-builder/SPEC); refresh post-W3 (fresh deputy or project-mapper). Maps are WARN-only in `state.ts --check`.
+- Worktrees: main · `../scrml-deputy-maint` (deputy, idle) · **the W3 agent worktree (`agent-a80f17c2cb0c3c4bc`, IN FLIGHT — do NOT clean).**
 
-## ⚠️ OPEN — needs the USER / next action
-1. **A2 — W2 (parser) DONE + LANDED** (S67 file-delta, agent a0761f89e7066e52a @143a73b2; clobber-safe base-check). W0 (F1=A) + W1 (SPEC §60) + W2 all closed. ast-builder recognizes `<api>` → `api-decl` AST node (BS unchanged); §34 +4 E-API-* (BASE-MISSING/METHOD-INVALID/RESPONSE-TYPE-UNDECLARED/ENDPOINT-MALFORMED); NO emission; §60 Nominal banner stays; +20 tests, full suite 24712/0. delta-log [27]. **NEXT WAVE → W3 (typer): a dev-agent dispatch for ENDPOINT-UNKNOWN / REQ-SHAPE-MISMATCH / PATH-PARAM-UNBOUND (resolve reqShape/responseType against §53/§14; bind path-params↔reqShape). Then W4 (codegen: `<request api=>` + parseVariant wiring) → W5 (tests + example + B-docs guide). Awaiting user go on W3.**
-2. **6nz AF — CONFIRMED by-design** (user "confirm AF"; reply sent). §36.1 clarified (dropped the `<poll>`-style overclaim) + §36.6 markup-interp note added (PA-direct, SPEC currency). **Lint impl pending:** `g-input-state-markup-nonreactive-lint` (LOW — the planned `W-INPUT-STATE-MARKUP-NONREACTIVE`; §34 row lands WITH the impl per Rule 4). A small dispatch when scheduled. delta-log [22].
-3. **ss3 REFRESHED + fire-ready** (user "refresh ss3"). `read spa.md ss3` → the expression-serializer **paren/span cluster** (`g-paren-binary-group-dropped-before-method` HIGH + `g-isop-call-tail-lhs-paren-miscompile` MED; same `_rewriteParenthesizedIsOp`/serializer ingestion, one fix may cover both). User fires. delta-log [23]. (Alternate ss: `ss2` engine-codegen poss-HIGH crash.)
-4. **flogence raw-route (serve-side)** — fold into A2 philosophy or bank as **dpa-002**.
-5. **stdlib Phase 3** — needs a §40.4 `fail`/`!{}`/bun-import ruling.
-6. **AA lint-fire regression** — `W-MATCH-VALUE-UNUSED` (S144, `emit-functions.ts:1021`) no longer fires on the v0.7.0 bare-tail-`match` repro. Not yet board-filed; investigation-worthy.
+## ⚠️ IN-FLIGHT TO LAND (next PA — S67 file-delta)
+- **A2 W3 (typer)** — agent **`a80f17c2cb0c3c4bc`**, isolation:worktree. Resolves api-decl endpoint types + `ENDPOINT-UNKNOWN`/`REQ-SHAPE-MISMATCH`/`PATH-PARAM-UNBOUND` + `<request api=>` recognition + §12.2 client-only confirm + §34 +3 rows; NO codegen; §60 banner stays Nominal. **Land via S67 file-delta** (S83 verify tip==reported, clobber-safe base-check on type-system.ts/ast-builder.js/SPEC.md, no leak; gap-reconcile §60.9; full suite; coherence-gated push). BRIEF at `docs/changes/api-primitive-a2-2026-06-20/BRIEF-W3.md`. delta-log [33].
 
-## CORPUS IDIOMATIC-IFICATION (S210 — in flight)
-- **Goal:** extend the example-corpus idiomatic sweep to ALL scrml-written projects (user directive). Mechanism RATIFIED: **scrml-PA runs read-only audits, sibling-PAs rewrite** (per-repo scope). Portable rubric = `scrml-support/docs/idiomatic-audit-kit.md` (S210).
-- **scrml's own LIGHT-EDIT tier** — CONFIRMED owed (7/9 examples still `${for/lift}`, 0 `<each>`; +13 try/catch +17 null). It's `ss11` item b1 (phase-b1-examples-rewrite) backlog — waves 1-3 did the REWRITE tier only. Fire ss11 to sweep it (eligible items 1/3/5/7/8).
-- **Sibling audits DONE + directives SENT + gaps triaged** (delta-log [28]/[30]/[31]; DDs at `scrml-support/docs/deep-dives/{giti,6nz,flogence}-idiomatic-audit-2026-06-20.md`, committed+pushed):
-  - **flogence** EXEMPLARY (7/7 KEEP, 5/5 pillars) — directive = no rewrites + drop 2 workarounds (14fb0230/aae34c26) + corpus-feed candidate.
-  - **6nz** half-idiomatic (KEEP1·EDIT7·REWRITE3) — directive = 3-tier (each-sweep · render→`<match for=Mode>` · async→`<engine>`).
-  - **giti** gap in 6 UI pages only (KEEP16·EDIT8·REWRITE5) — directive = 3-tier (each-sweep ~16 sites · status→Phase+`<match>` · live/feed→`<engine>`).
-  - **Gap triage: all 5 NEW confirm-live flags NOT-REPRODUCED** (6nz #2-#5 + giti CG-5) → ZERO new scrml bugs; sibling comments stale (removable). 6nz Bug AA stays open.
-  - **AWAITING:** the 3 sibling PAs to execute their rewrites (per-repo scope; runs in their own instances). The corpus-feed idea (flogence → scrml G1/G2/G5 examples) is a parked candidate.
+## ⚠️ TO FIRE (user fires sPAs) — the recommended pair (disjoint from W3 + each other)
+- **`ss11`** (doc-currency-corpus) — the fattest list; **this is the scrml-own corpus/LIGHT-EDIT sweep** (item b1 = examples canonical-form + the `<each>` LIGHT-EDIT tier the audit confirmed owed). Eligible items 1/3/5/7/8 (items 4/6 marketing Rule-1-gated, item 2 user-owned). Docs/corpus surface — disjoint from W3.
+- **`ss7`** (meta-reflect-l22) — 2 items (`reflect()`/`^{}` meta-eval variant-shape + happy-dom mount-hang); meta-checker.ts/render-harness.js — disjoint from W3 + ss11.
+- (Avoid while W3 in flight: ss5/ss6/ss12 [type-system.ts], ss4 [ast-builder.js] — collide with W3.)
+
+## READY dispatches (not yet fired)
+- **A2 W4 (codegen)** — AFTER W3 lands: emit the typed fetch callable + parseVariant wiring + the `<request api=>` runtime integration; then W5 (tests + example + B-docs guide). Flips the §60 Nominal banner at the end (W5).
+- **bug-20 `promote --engine`** (ruling B ratified) — a ready LOW dispatch: the `--engine` span-rewrite (mirrors `--match`/`--each`) reusing `W-MATCH-RULE-INERT` + `W-ENGINE-INITIAL-MISSING`; NO new lint (W-MATCH-TRANSITIONS-ACCRUING dropped). promote.js. Amend SPEC §56.6 to drop the W-MATCH-TRANSITIONS-ACCRUING ref when it lands.
+
+## OPEN — needs USER
+- **bug-1 sub-arc 2 (safelist/@apply)** — the SOLE open remainder of bug-1; §26.5-deferred, no ruled direction. PA lean: stay deferred (the `lint.tailwind-unrecognized-class=off` escape hatch covers the pain). (User ruled B, left A open.)
+- **Sibling rewrites** — giti/6nz/flogence PAs execute their idiomatic rewrites in their own instances (per-repo scope; directives in their inboxes). flogence corpus-feed candidate (its idioms → scrml G1/G2/G5 teaching examples) is a parked idea.
+- **stdlib Phase 3** (§40.4 ruling) · **flogence raw-route** (dpa-002 or fold into A2) — carried design escalations.
 
 ## OPEN escalations carried (S209)
-- ss5 item3 `g-channel-server-keyword-auto-migrate` (Enhanced-A, DEFERRED S189) · ss9 §20.5 SPEC examples (migrate vs carve-out) · ss10 item7 render-gap-ingestion + item8 L2/L3 oracle-strategy · ss6 b17 cases 1-3 (gated on `g-component-body-markup-parser-absent`) · §58 build-story re-bucket · §20.5+despace residual (ss11 items 4-8, partly Rule-1 marketing-gated).
+- ss5 item3 `g-channel-server-keyword-auto-migrate` (Enhanced-A, DEFERRED S189) · ss9 §20.5 SPEC examples · ss10 item7/item8 · ss6 b17 cases 1-3 · §58 build-story re-bucket · §20.5+despace residual (ss11 items, partly Rule-1 gated).
 
 ## OTHER carry
-- **giti/6nz pa.md modernization** committed LOCAL+UNPUSHED in siblings (giti `72fda7c` / 6nz `e6fc5e8`) — push from their instances.
-- ss3 residuals not board-filed: #2 dead each-sigil band-aid in `expr-node-corpus-invariant.test.js` (test-hygiene) · #3 native-parser `@.` structuring not verified.
-- item6 **native-parser M2-M6** PARKED→escalate (~v0.8 default-flip).
+- giti/6nz pa.md modernization committed LOCAL+UNPUSHED in siblings (giti `72fda7c` / 6nz `e6fc5e8`).
+- AA (6nz bare-tail-match) stays open (lint-fire regression). AF lint impl pending (g-input-state-markup-nonreactive-lint).
 
 ## pa.md directives in force
-R1–R5 · `---` delimiter · Profile A · digest-first (S203) · S88 isolation · S99/S126 path-discipline · S136 BRIEF.md · S138 R26 verify-before-claim (both directions) · S147 coherence · S164 bg-commit-race · **S205 merge-before-push gate** · S119 explicit-pathspec (deputy active) · wrap 8-step · S206 flogence + co-location · S208 sPA role · S209 cPA monitor-not-launch + §2.1 deref-vs-mark.
+R1–R5 · `---` delimiter · Profile A · digest-first (S203) · S88 isolation · S99/S126 path-discipline · S136 BRIEF.md · S138 R26 verify-before-claim · S147 coherence · S164 bg-commit-race · S205 merge-before-push gate · S119 explicit-pathspec · wrap 8-step · S206 flogence + co-location · S208 sPA role · S209 cPA monitor-not-launch + §2.1 deref-vs-mark · S210 idiomatic-audit-kit + scrml-PA-audits-sibling-PAs-rewrite.
 
 ## Tags
-#session-210 #open #profile-a #board-high-1 #ss3-integrated #paren-span-cluster #a2-w0-dd-landed #a2-A-vs-B-Q1 #AF-ruling-owed #next-ss-ss3-or-ss2 #deputy-active #push-pending
+#session-210 #close #wrapped #profile-a #board-high-0 #a2-w0-w3 #w3-in-flight #ss11-ss7-to-fire #bug-20-ready #sibling-idiomatic-audits-done #deputy-idle-needs-boot #maps-49-behind
