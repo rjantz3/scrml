@@ -22,9 +22,9 @@ ${
 
   <p>Status: ${@status}</>
   <ul>
-    for (msg of @messages) {
-      <li>${msg}</>
-    }
+    <each in=@messages>
+      <li>${@.}</>
+    </each>
   </ul>
 </div>
 </program>

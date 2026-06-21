@@ -2,7 +2,7 @@
 ${
     const Counter = <div class="counter">
         ${
-            @localCount = 0
+            <localCount> = 0
         }
         <button onclick=${() => @localCount = @localCount + 1}>${@localCount}</>
     </>

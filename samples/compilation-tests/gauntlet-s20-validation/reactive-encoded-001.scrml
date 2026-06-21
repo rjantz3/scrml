@@ -7,8 +7,8 @@ ${
 }
 
 <ul>
-  for (item of @items) {
-    <li>${item}</>
-  }
+  <each in=@items>
+    <li>${@.}</>
+  </each>
 </ul>
 <p>Selected: ${@selected}</>

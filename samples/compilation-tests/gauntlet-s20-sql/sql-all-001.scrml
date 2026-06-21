@@ -6,8 +6,8 @@ ${
   let users = ?{`SELECT id, name FROM users`}.all()
 }
 <ul>
-  for (user of users) {
+  <each in=users as user>
     <li>${user.name}</>
-  }
+  </each>
 </ul>
 </>

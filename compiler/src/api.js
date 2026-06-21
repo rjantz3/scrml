@@ -49,6 +49,7 @@ import { runIFnPromotable } from "./lint-i-fn-promotable.js";
 import { runWEachPromotable } from "./lint-w-each-promotable.js";
 import { runWEachKey } from "./lint-w-each-key.js";
 import { runWMapIterationOrder } from "./lint-w-map-iteration-order.js";
+import { runWInterpInRawContent } from "./lint-w-interp-in-raw-content.js";
 import { findUnsupportedTailwindShapes, findUnrecognizedClasses } from "./tailwind-classes.js";
 import { runGauntletPhase1Checks } from "./gauntlet-phase1-checks.js";
 import { runGauntletPhase3EqChecks } from "./gauntlet-phase3-eq-checks.js";
@@ -959,6 +960,26 @@ export function compileScrml(options = {}) {
     const errors = allErrors;
     const warnings = [];
     return { errors, warnings, lintDiagnostics: allLintDiagnostics, fileCount: 0, outputDir: outputDir || "", durationMs: 0, outputs: new Map() };
+  }
+
+  // Stage 2.5: W-INTERP-IN-RAW-CONTENT info-level lint (SPEC §4.17).
+  // A scrml-significant token (`${...}` / `<TagName>` / brace sigil) inside a
+  // raw-content `<pre>` / `<code>` body passes through LITERALLY per §4.17 — the
+  // body is a single raw text run by design. The §4.17 rule is correct; the
+  // defect this lint closes is the SILENCE (an author writing `<pre>${board}</pre>`
+  // ships broken output with zero signal — Flux dog-food S193). Runs over the
+  // block-split AST (`bsResults`) since the raw body is a BS-captured text child.
+  // Pushed through `collectErrors` so the `W-` prefix + `severity:"info"`
+  // partition the diagnostic into `result.warnings` (non-fatal; CLI exit 0) —
+  // never `result.errors`. The message steers to a non-raw wrapper
+  // (`<div class='whitespace-pre'>`) or explicit escaping.
+  try {
+    const rawInterpDiags = runWInterpInRawContent(bsResults);
+    for (const d of rawInterpDiags) {
+      collectErrors("BS-LINT", [d], d.filePath || null);
+    }
+  } catch (e) {
+    if (verbose) log(`  [LINT] W-INTERP-IN-RAW-CONTENT pass threw: ${e?.message ?? String(e)}`);
   }
 
   // Stage 3: TAB (per-file)

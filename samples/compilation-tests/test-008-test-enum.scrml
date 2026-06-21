@@ -4,7 +4,7 @@
 type Color:enum = { Red, Green, Blue }
 
 ${
-    function label(c) {
+    function label(c: Color) {
         return match c {
             .Red :> "red"
             .Green :> "green"

@@ -1,12 +1,9 @@
-// const with array type annotation
+// const with array type annotation, iterated via canonical `<each>` (§17.7)
 ${
     const items: string[] = ["a", "b", "c"]
 }
 <ul>
-    <li for @items / lift item />
-        ${item}
-    </>
+    <each in=items as item>
+        <li>${item}</li>
+    </each>
 </ul>
-${
-    <items> = items
-}

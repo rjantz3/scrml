@@ -1,9 +1,9 @@
-// fn declared inside a ^{} meta block
+// function declared inside a ^{} meta block (`fn` is logic-block-only — §48.2 / E-PARSE-002; meta blocks use plain `function`)
 ${
     type User:struct = { name: string, age: number }
 }
 ^{
-    fn buildSchema() {
+    function buildSchema() {
         let s = reflect(User)
         return s
     }

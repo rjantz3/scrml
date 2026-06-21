@@ -9,5 +9,7 @@ ${
     }
 }
 <ul>
-    <li for buildItems(["a","bb","ccc"]) / lift it />${it.label}-${it.length}</>
+    <each in=buildItems(["a","bb","ccc"]) as it>
+        <li>${it.label}-${it.length}</li>
+    </each>
 </ul>
