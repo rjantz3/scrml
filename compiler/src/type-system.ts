@@ -10862,6 +10862,18 @@ function annotateNodes(
         ));
         return;
       }
+      // §36.6 / §6.7.7 — a `<#id>` input-state OR request ref used in an unquoted
+      // condition/attr (`if=<#id>.loading`, `show=<#id>.data`) is lowered by the
+      // TAB stage (`preprocessWorkerAndStateRefs`) to the bare compiler-internal
+      // token `_scrml_input_<id>_` BEFORE this pass runs. That token is NEVER a
+      // user scope binding — it resolves at codegen to `_scrml_request_<id>` (a
+      // `<request>` id, §6.7.7) or `_scrml_input_state_registry.get("id")` (a §36
+      // input-state id). The trailing-`_` anchor (NON-identifier char after it)
+      // distinguishes the user id-ref from a runtime helper (`_scrml_input_mouse_create`).
+      // Skip the scope check so `if=<#id>.X` no longer false-fires E-SCOPE-001.
+      if (/^_scrml_input_[A-Za-z_$][A-Za-z0-9_$]*_(?![A-Za-z0-9_$])/.test(name)) {
+        return;
+      }
       // For dotted access like @todos.length, resolve the base name (@todos)
       const baseName = name.includes(".") ? name.slice(0, name.indexOf(".")) : name;
       const entry = scopeChain.lookup(baseName);

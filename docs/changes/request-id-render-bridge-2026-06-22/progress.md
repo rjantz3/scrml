@@ -51,3 +51,39 @@ Keeps par 36 render-once semantics intact (only <request> ids become reactive).
 
 ## Log
 - Phase 0 complete; scope = clean bridge. Beginning impl.
+
+- Seam 1 DONE (commit f144d7b1): _scrml_request_<id> = _scrml_deep_reactive({...}); dead
+  _scrml_notify removed; deep_reactive chunk pulled on <request> (CHUNKED_MARKUP_TAGS + walk).
+- Seam 2+3 (interpolation) DONE: collectRequestIds(fileAST) added to reactive-deps.ts;
+  EmitExprContext.requestIds routes emitInputStateRef + emitIdent bare-recovery to
+  _scrml_request_<id>; EmitLogicOpts.requestIds + _makeExprCtx forward; threaded through
+  emit-reactive-wiring emitOpts + if/for/while/do-while opts reconstructions (which had
+  dropped mapVarNames too) + the nested else-if _makeExprCtx({}) latent bug (now bodyOpts).
+  emit-html exprHasRequestRef marks the binding hasRequestRef (matches BOTH <#id> AND the
+  TAB-lowered bare _scrml_input_<id>_ form — KEY: by codegen the expr is already
+  _scrml_input_feed_.data, not <#feed>.data). emit-event-wiring forces the _scrml_effect
+  path on hasRequestRef + threads requestIds. binding-registry LogicBinding +hasRequestRef.
+  VERIFIED: `<div>${<#feed>.data}</>` + `<request id="feed" url="/api/feed">` emits
+  `_scrml_render_value(el, _scrml_request_feed.data)` + `_scrml_effect(...)` (reactive).
+- NEXT: the if=/lift-block condition form + <match on=<#id>.data>.
+
+- match on=${<#id>.data} DONE: resolveOnExpr (emit-match.ts) Shape-B complex
+  fall-through now threads collectRequestIds(fileAST) into emitExpr ctx → on= routes
+  to _scrml_request_<id>.data; dispatch already _scrml_effect-wrapped (Proxy auto-tracks).
+  VERIFIED: block-form `<match for=Phase on=${<#feed>.data}>` emits
+  `_scrml_effect(() => __dispatch(_scrml_request_feed.data))`.
+- E-SCOPE-001 exemption (type-system.ts visitAttr): a lowered `_scrml_input_<id>_`
+  ref in an unquoted if=/show= attr no longer false-fires E-SCOPE-001 (it resolves at
+  codegen to _scrml_request_<id> / the §36 registry, never a user binding).
+- SURFACED (separate parse-level bugs, NOT codegen render-bridge — see report):
+  (a) `if=<#id>.member` DROPS the `.member` at tokenize time — the attr value parses as
+      `{kind:"variable-ref", name:"_scrml_input_feed_"}` with NO `.loading`/`.data`. So
+      `if=<#id>.loading` lowers to a bare base read (reads the wrong thing). Tokenizer/
+      attr-value bug, independent of the render bridge.
+  (b) `${<#id>.data}` NESTED inside a lifted element (`lift <h1>${<#id>.data}</>`) inside
+      a markup-if-block mangles `_scrml_input_feed_` → `crml_input_feed_` (clips `_s`).
+      Lift-path string-rewrite bug.
+  (c) the bare `if (<#id>.loading) { lift }` markup-if condition (emit-lift path) reads
+      the §36 registry, not _scrml_request_<id> — emit-lift.js condition lowering does
+      not thread requestIds (the string rewriteRequestRefs ordering should cover it, but
+      the lift path mangles before reach).

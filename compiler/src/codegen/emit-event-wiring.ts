@@ -64,6 +64,13 @@ interface LogicBinding {
   placeholderId?: string;
   expr?: string;
   reactiveRefs?: Set<string> | null;
+  /**
+   * §6.7.7 — set by emit-html.ts when the binding expr reads a `<#id>` ref whose
+   * id names a `<request>` (its state is the reactive `_scrml_request_<id>`
+   * deep-reactive Proxy). The binding carries no `@var` dep, so this flag forces
+   * the `_scrml_effect`-wrapped reactive path (the Proxy auto-tracks the read).
+   */
+  hasRequestRef?: boolean;
   isConditionalDisplay?: boolean;
   isVisibilityToggle?: boolean;
   /** S105 B1 — reactive HTML Boolean attr (disabled/readonly/required). */
@@ -400,8 +407,11 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
   // `onclick=@m.insert(k, v)` in a map-only file (no `<engine>`) still needs
   // the map interception. Merged into the extras spread so direct
   // `emitExprField(..., { ...engineExprCtxExtras })` calls below see it.
-  const { collectMapVarNames, collectOrderedMapVarNames } = require("./reactive-deps.ts");
+  const { collectMapVarNames, collectOrderedMapVarNames, collectRequestIds } = require("./reactive-deps.ts");
   const mapVarNames: Set<string> = collectMapVarNames(ctx.fileAST);
+  // §6.7.7 / §60.4 — `<request>` id set so a `${<#id>.data}` / `if=<#id>.loading`
+  // binding lowers its `<#id>` ref to the reactive `_scrml_request_<id>` object.
+  const requestIds: Set<string> = collectRequestIds(ctx.fileAST);
   // §59.8 (S169) — the `@ordered`-typed subset, so a reassignment `@m = [...]`
   // inside an event handler (`onclick=rebuild()`) lowers the literal ordered.
   const orderedMapVarNames: Set<string> = collectOrderedMapVarNames(ctx.fileAST);
@@ -409,6 +419,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
     ...(engineRewriteCtx?.exprCtxExtras ?? {}),
     ...(mapVarNames.size > 0 ? { mapVarNames } : {}),
     ...(orderedMapVarNames.size > 0 ? { orderedMapVarNames } : {}),
+    ...(requestIds.size > 0 ? { requestIds } : {}),
   };
 
   lines.push("");
@@ -1231,8 +1242,13 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         continue;
       }
 
-      if (varRefs.length > 0) {
-        let rewrittenExpr = emitExprField(binding.exprNode, expr, { mode: "client", derivedNames: ctx.derivedNames, synthCellKeys: ctx.synthCellKeys });
+      // §6.7.7 — a `${<#id>.data}` request-state interpolation has NO `@var` dep
+      // but IS reactive (the `_scrml_request_<id>` deep-reactive Proxy auto-tracks
+      // the read inside `_scrml_effect`). `binding.hasRequestRef` forces this
+      // effect-wrapped path; `requestIds` (in engineExprCtxExtras) routes the
+      // `<#id>` ref to `_scrml_request_<id>` instead of the §36 input-state registry.
+      if (varRefs.length > 0 || binding.hasRequestRef) {
+        let rewrittenExpr = emitExprField(binding.exprNode, expr, { mode: "client", derivedNames: ctx.derivedNames, synthCellKeys: ctx.synthCellKeys, ...engineExprCtxExtras });
 
         // When encoding is active, replace _scrml_reactive_get("name") with encoded names
         if (encodingCtx && encodingCtx.enabled) {

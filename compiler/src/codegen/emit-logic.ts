@@ -144,6 +144,15 @@ export interface EmitLogicOpts {
    */
   mapVarNames?: Set<string> | null;
   /**
+   * §6.7.7 / §60.4: file-level set of `<request>` `id` values. Forwarded into
+   * `EmitExprContext.requestIds` so `emit-expr.ts` routes a `<#id>` markup ref
+   * whose id names a `<request>` to the reactive `_scrml_request_<id>` object
+   * (NOT the §36 input-state registry, which the request never populates).
+   * Computed once per file via `collectRequestIds` (reactive-deps.ts). NULL or
+   * empty → no `<request>` in scope. Sibling to `mapVarNames` / `engineVarNames`.
+   */
+  requestIds?: Set<string> | null;
+  /**
    * §59.8 (S169): the STRICT subset of `mapVarNames` whose `state-decl` type
    * annotation is an `@ordered` map (`[KeyT: ValT]@ordered`). Used by
    * `emit-expr.ts:emitAssign` to lower a reassignment `@m = [...]` to an
@@ -722,6 +731,9 @@ function _makeExprCtx(opts: EmitLogicOpts): EmitExprContext {
     // §59 (D4) — map variable name set so emit-expr can intercept `@m[k]`
     // reads / `@m.<method>(…)` calls / `@m.size` and lower them to `_scrml_map_*`.
     mapVarNames: opts.mapVarNames ?? null,
+    // §6.7.7 / §60.4 — request id set so emit-expr routes `<#id>` request refs
+    // to the reactive `_scrml_request_<id>` object instead of the §36 registry.
+    requestIds: opts.requestIds ?? null,
     // §59.8 (S169) — ordered-map cell names so emit-expr:emitAssign lowers a
     // reassignment `@m = [...]` to an ordered cell with the ordered flag set.
     orderedMapVarNames: opts.orderedMapVarNames ?? null,
@@ -2535,6 +2547,8 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         ...(opts.enginesWithHistory ? { enginesWithHistory: opts.enginesWithHistory } : {}),
         ...(opts.enginesWithMessageArms ? { enginesWithMessageArms: opts.enginesWithMessageArms } : {}),
         ...(opts.engineMessageVariants ? { engineMessageVariants: opts.engineMessageVariants } : {}),
+        ...(opts.requestIds ? { requestIds: opts.requestIds } : {}),
+        ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}),
         ...(opts.machineBindings ? { machineBindings: opts.machineBindings } : {}),
       } as any);
 
@@ -2566,6 +2580,8 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         ...(opts.enginesWithHistory ? { enginesWithHistory: opts.enginesWithHistory } : {}),
         ...(opts.enginesWithMessageArms ? { enginesWithMessageArms: opts.enginesWithMessageArms } : {}),
         ...(opts.engineMessageVariants ? { engineMessageVariants: opts.engineMessageVariants } : {}),
+        ...(opts.requestIds ? { requestIds: opts.requestIds } : {}),
+        ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}),
       } as any);
 
     case "while-stmt":
@@ -2576,12 +2592,12 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // R25-Bug-42 (S138): thread `boundary` so SQL-bearing yield/return
       // statements inside the loop body emit via the server case "sql" path
       // when the enclosing fn is server-bound.
-      return emitWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells });
+      return emitWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}) });
 
     case "do-while-stmt":
       // R25-Bug-42 (S138): thread `boundary` so SQL-bearing yield/return
       // statements inside the loop body emit via the server case "sql" path.
-      return emitDoWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells });
+      return emitDoWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}) });
 
     case "break-stmt":
       return emitBreakStmt(node);
@@ -3613,7 +3629,10 @@ function emitIfExprAltChain(alternate: any[], bodyOpts: EmitLogicOpts, lines: st
   if (alternate.length === 1 && alternate[0]?.kind === "if-stmt") {
     // else if — emit without extra braces (§17.6.8)
     const nestedIf = alternate[0];
-    const nestedCond = emitExprField(nestedIf.condExpr, (nestedIf.condition ?? "true").trim(), _makeExprCtx({}));
+    // The nested else-if condition must inherit the SAME opts as the body
+    // (`bodyOpts`) so a `<#id>` request ref / `@m[k]` map read / engine read in
+    // the condition lowers correctly — `_makeExprCtx({})` dropped them all.
+    const nestedCond = emitExprField(nestedIf.condExpr, (nestedIf.condition ?? "true").trim(), _makeExprCtx(bodyOpts));
     const nestedConsequent: any[] = nestedIf.consequent ?? [];
     // E-LIFT-002: multiple lifts on same path in a value-lift arm
     if (countTopLevelLifts(nestedConsequent) > 1) {

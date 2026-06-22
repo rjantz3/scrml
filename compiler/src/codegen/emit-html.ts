@@ -3,7 +3,7 @@ import { emitStringFromTree, exprNodeContainsMemberAccess } from "../expression-
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "../types/ast.ts";
 import { escapeHtmlAttr, VOID_ELEMENTS } from "./utils.ts";
-import { extractReactiveDeps, collectReactiveVarNames, extractReactiveDepsTransitive, buildFunctionBodyRegistry } from "./reactive-deps.ts";
+import { extractReactiveDeps, collectReactiveVarNames, extractReactiveDepsTransitive, buildFunctionBodyRegistry, collectRequestIds } from "./reactive-deps.ts";
 import { hasTemplateInterpolation } from "./rewrite.js";
 import { CGError } from "./errors.ts";
 import type { BindingRegistry } from "./binding-registry.ts";
@@ -573,6 +573,36 @@ export function generateHtml(
   }
 
   const reactiveVarNames: Set<string> | null = fileAST ? collectReactiveVarNames(fileAST) : null;
+  // §6.7.7 / §60.4 — `<request>` id set. A `${<#id>.data}` / `if=<#id>.loading`
+  // interpolation reads a REACTIVE `_scrml_request_<id>` object (deep-reactive
+  // Proxy) but carries NO `@var` ref, so `extractReactiveDeps` returns empty and
+  // the binding would fall to the non-reactive one-shot path. We mark such a
+  // binding with `hasRequestRef` so emit-event-wiring forces the `_scrml_effect`-
+  // wrapped path (the Proxy auto-tracks the read → re-renders on fetch resolve).
+  const requestIdsForBindings: Set<string> = fileAST ? collectRequestIds(fileAST) : new Set<string>();
+  const exprHasRequestRef = (expr: string): boolean => {
+    if (!expr || requestIdsForBindings.size === 0) return false;
+    // Form 1: the literal `<#id>` sigil (survives raw in some paths).
+    if (expr.includes("<#")) {
+      const re = /<#([A-Za-z_$][A-Za-z0-9_$]*)>/g;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(expr)) !== null) {
+        if (requestIdsForBindings.has(m[1])) return true;
+      }
+    }
+    // Form 2: the already-lowered bare `_scrml_input_<id>_` form produced by the
+    // TAB stage (`preprocessWorkerAndStateRefs`) for a `${<#id>...}` interpolation
+    // BEFORE codegen runs. The trailing-`_` anchor (NON-identifier-char after it)
+    // distinguishes a user id-ref from a runtime helper (`_scrml_input_mouse_create`).
+    if (expr.includes("_scrml_input_")) {
+      const re2 = /_scrml_input_([A-Za-z_$][A-Za-z0-9_$]*?)_(?![A-Za-z0-9_$])/g;
+      let m2: RegExpExecArray | null;
+      while ((m2 = re2.exec(expr)) !== null) {
+        if (requestIdsForBindings.has(m2[1])) return true;
+      }
+    }
+    return false;
+  };
   const fnBodyRegistry = fileAST ? buildFunctionBodyRegistry(fileAST) : null;
   // A1c C3 — file-scope handle for render-by-tag tag→cell resolution.
   // `runSYM` (symbol-table.ts:6271) attaches `_scope` non-enumerably to the FileAST.
@@ -2258,6 +2288,10 @@ export function generateHtml(
             const reactiveRefs = fnBodyRegistry
               ? extractReactiveDepsTransitive(exprStr, reactiveVarNames, fnBodyRegistry)
               : extractReactiveDeps(exprStr, reactiveVarNames);
+            // §6.7.7 — a `${<#id>.data}` request-state interpolation carries no
+            // `@var` dep but IS reactive (the `_scrml_request_<id>` deep-reactive
+            // Proxy). Mark it so emit-event-wiring forces the effect-wrapped path.
+            const hasRequestRef = exprHasRequestRef(exprStr);
             // errorBoundary (§19.6) — when this `${...}` interpolation sits in a
             // boundary subtree, stamp the innermost boundary's catch context so
             // emit-event-wiring.ts emits the typed-error dispatch + the C-hybrid
@@ -2266,12 +2300,13 @@ export function generateHtml(
             registry.addLogicBinding(eb
               ? {
                   placeholderId, expr: exprStr, exprNode: child.exprNode, reactiveRefs,
+                  ...(hasRequestRef ? { hasRequestRef: true } : {}),
                   boundaryId: eb.boundaryId,
                   boundaryFallbackExpr: eb.fallbackExpr,
                   boundaryHasFallback: eb.hasFallback,
                   boundaryVariantRenders: eb.variantRenders,
                 }
-              : { placeholderId, expr: exprStr, exprNode: child.exprNode, reactiveRefs });
+              : { placeholderId, expr: exprStr, exprNode: child.exprNode, reactiveRefs, ...(hasRequestRef ? { hasRequestRef: true } : {}) });
           }
         }
       }

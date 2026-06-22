@@ -415,6 +415,73 @@ export function collectMapVarNames(fileAST: Record<string, unknown>): Set<string
 }
 
 /**
+ * §6.7.7 / §60.4 — Collect every `<request>` `id` value in the file. A `<#id>`
+ * markup ref whose id is in this set is a REQUEST-STATE ref: its `.loading` /
+ * `.data` / `.error` / `.stale` live on the `_scrml_deep_reactive`-wrapped
+ * `_scrml_request_<id>` object (which IS reactive — §6.7.7), NOT the §36
+ * input-state registry (`_scrml_input_state_registry`, which a `<request>` never
+ * populates — reading it returns `undefined` and a `.loading` access throws).
+ *
+ * Codegen has no resolved type at the `<#id>` emit site, so `emit-expr.ts` keys
+ * the request-vs-input lowering on this collected name-set exactly as
+ * `mapVarNames` keys the map-vs-array branch and `engineVarNames` keys the
+ * `.advance` interception. A non-request `<#id>` falls through to the §36 registry
+ * lowering (render-once non-reactive by design, §36.6 — left UNCHANGED).
+ *
+ * `<request>` nodes can be declared at the top level OR nested inside engine
+ * state-child bodies (`bodyChildren`), so the walk mirrors the reactive-wiring
+ * collector's descent (emit-reactive-wiring.ts `collectAllCells`).
+ */
+export function collectRequestIds(fileAST: Record<string, unknown>): Set<string> {
+  const ids = new Set<string>();
+  if (!fileAST || typeof fileAST !== "object") return ids;
+  const nodes = getNodes(fileAST);
+
+  function extractId(node: any): string | null {
+    const attrs: any[] = node.attrs ?? node.attributes ?? [];
+    for (const a of attrs) {
+      if (a?.name !== "id") continue;
+      const v = a.value;
+      if (v?.kind === "string-literal" && typeof v.value === "string") return v.value;
+      if (typeof v === "string") return v;
+      if (typeof v?.value === "string") return v.value;
+    }
+    return null;
+  }
+
+  function visit(nodeList: unknown[]): void {
+    if (!Array.isArray(nodeList)) return;
+    for (const node of nodeList) {
+      if (!node || typeof node !== "object") continue;
+      const n = node as any;
+
+      if (n.kind === "markup" && n.tag === "request") {
+        const id = extractId(n);
+        if (id) ids.add(id);
+      }
+
+      // Descend the same structures as the reactive-wiring collector so a
+      // `<request>` nested in markup children / engine state-child bodies /
+      // logic blocks is found.
+      if (Array.isArray(n.children)) visit(n.children as unknown[]);
+      if (Array.isArray(n.bodyChildren)) visit(n.bodyChildren as unknown[]);
+      if (n.kind === "logic" && Array.isArray(n.body)) visit(n.body as unknown[]);
+      if (n.kind === "if-stmt") {
+        if (Array.isArray(n.consequent)) visit(n.consequent as unknown[]);
+        if (Array.isArray(n.alternate)) visit(n.alternate as unknown[]);
+      }
+      if ((n.kind === "for-stmt" || n.kind === "while-stmt") && Array.isArray(n.body)) {
+        visit(n.body as unknown[]);
+      }
+      if (n.kind === "match-stmt" && Array.isArray(n.body)) visit(n.body as unknown[]);
+    }
+  }
+
+  visit(nodes as unknown[]);
+  return ids;
+}
+
+/**
  * §59.8 (S169) — Collect the names of every cell whose `state-decl` type
  * annotation is an `@ordered` value-native map (`[KeyT: ValT]@ordered`). This is
  * the STRICT subset of `collectMapVarNames` for which a map-literal VALUE must

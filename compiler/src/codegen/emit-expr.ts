@@ -265,6 +265,18 @@ export interface EmitExprContext {
    * byte offset. Preferred over `node.span` only when the latter is not set.
    */
   stmtSpan?: { file?: string; start?: number; line?: number } | null;
+  /**
+   * §6.7.7 / §60.4 — file-level set of `<request>` `id` values. A `<#id>` markup
+   * ref whose id is in this set is a REQUEST-STATE ref (its `.loading`/`.data`/
+   * `.error`/`.stale` live on the `_scrml_deep_reactive`-wrapped `_scrml_request_<id>`
+   * object, which IS reactive — §6.7.7), NOT a §36 input-state ref (which lowers
+   * to the render-once non-reactive `_scrml_input_state_registry`, §36.6). Both
+   * `<#id>` lowering seams (`emitInputStateRef` and the `emitIdent` bare-recovery)
+   * route a request id to `_scrml_request_<id>` so the read targets the live
+   * request state. Populated by `collectRequestIds(fileAST)`. NULL/empty → no
+   * `<request>` in scope (all `<#id>` refs lower to the §36 input-state registry).
+   */
+  requestIds?: Set<string> | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -353,7 +365,7 @@ export function emitExpr(node: ExprNode, ctx: EmitExprContext): string {
     case "cast":        return emitCast(node, ctx);
     case "match-expr":  return emitMatchExpr(node, ctx);
     case "sql-ref":     return emitSqlRef(node, ctx);
-    case "input-state-ref": return emitInputStateRef(node);
+    case "input-state-ref": return emitInputStateRef(node, ctx);
     case "escape-hatch": return emitEscapeHatch(node, ctx);
     case "map-lit":     return emitMapLit(node, ctx);
     case "markup-value": {
@@ -529,6 +541,11 @@ function emitIdent(node: IdentExpr, ctx: EmitExprContext): string {
   if (name.length > 13 && name.startsWith("_scrml_input_") && name.endsWith("_")) {
     const m = name.match(/^_scrml_input_([A-Za-z_$][A-Za-z0-9_$]*)_$/);
     if (m) {
+      // §6.7.7 — a request id routes to the reactive `_scrml_request_<id>`
+      // object (same routing as the structured `emitInputStateRef` seam).
+      if (ctx.requestIds && ctx.requestIds.has(m[1])) {
+        return `_scrml_request_${m[1]}`;
+      }
       return `_scrml_input_state_registry.get(${JSON.stringify(m[1])})`;
     }
   }
@@ -1954,7 +1971,16 @@ function emitSqlRef(node: SqlRefExpr, _ctx: EmitExprContext): string {
   return `/* sql-ref:${node.nodeId} */`;
 }
 
-function emitInputStateRef(node: InputStateRefExpr): string {
+function emitInputStateRef(node: InputStateRefExpr, ctx: EmitExprContext): string {
+  // §6.7.7 / §60.4 — a `<#id>` whose id names a `<request>` is a REQUEST-STATE
+  // ref: its state lives on the reactive `_scrml_request_<id>` object, NOT the
+  // §36 input-state registry (which the request never populates). Reading the
+  // registry returns `undefined` → a `.loading`/`.data` access throws. Route to
+  // the request state object. Non-request ids keep the §36 registry lowering
+  // (render-once non-reactive by design, §36.6).
+  if (ctx.requestIds && ctx.requestIds.has(node.name)) {
+    return `_scrml_request_${node.name}`;
+  }
   return `_scrml_input_state_registry.get("${node.name}")`;
 }
 
