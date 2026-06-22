@@ -22,10 +22,12 @@ design-track (debates / DDs / from-scratch subsystems / axiom Qs / rulings) → 
 
 ---
 
-## Bucket A — sPA execution lists (11 surviving + 3 retired)
+## Bucket A — sPA execution lists (13 surviving + 3 retired)
 
 | ss | speciality | n | core files | shared ingestion (one-liner) | fill-target |
 |----|-----------|---|-----------|------------------------------|-------------|
+| 15 | render-collection-codegen | 5 | collect.ts · emit-lift.ts · emit-html.ts · tailwind-classes.js | render/collection emit + S213 render-bridge: on-mount slot · request-lift D1/D2 · tailwind-scoped-class lint · §6.7.7 doc. **NEW S214.** | ~50% · healthy |
+| 16 | pongai-type-system-codegen | 3 | emit-expr.ts · type-system.ts · log-loc.ts · scrml-bug-report.md | PongAI cluster (root-caused S213): C5 ctor-arg typing · C4 ==-vs-payload-variant lint · C3 render-shadowing. **NEW S214.** | ~40% · tight |
 | 3 | codegen-expr-attr | 0 | rewrite.ts · emit-expr.ts · expression-parser.ts | **DRAINED S210** — paren/span cluster (g-paren-binary-group HIGH + g-isop-call-tail MED) integrated `d84e85d2`; prior 3 items (bare-compound is-op / is-op-ternary / `@.`-sigil) integrated `2eea9d4e`. Residuals not minted: each-sigil band-aid test-hygiene · native-parser `@.` · emitStringFromTree defense-in-depth. | drained |
 | 8 | promotion-tailwind | 0 | tailwind-classes.js | **DRAINED S210** — bug-1 sub-arcs 1+3 (string-shaped + ring-offset arbitrary values) LANDED `115dabe3` + SPEC §26 currency. 2 items PARKED→PA design-track (Bucket B): sub-arc 2 safelist/@apply (§26.5-deferred) + bug-20 promote `--engine` (W-MATCH-TRANSITIONS-ACCRUING overlaps shipped W-MATCH-RULE-INERT). | drained → 2 design-track |
 | 11 | doc-currency-corpus | 8 | tutorial.md · ARTICLE-TRUTHFULNESS-AUDIT · articles/ · README.md · website/ · examples/ · samples/compilation-tests/ | doc/corpus currency + the canonical-scrml v0.2.0 content rewrite (B1/B2/C1/C2/C3). | ~62% · healthy (fattest exec) |
@@ -44,7 +46,7 @@ design-track (debates / DDs / from-scratch subsystems / axiom Qs / rulings) → 
 > **AA singleton (deferred to PA, no ss-number minted):** 6nz AA (bare tail `match` in a plain function
 > silently dropped) is the ONLY still-open S210-intake sPA bug, but has NO same-ingestion Bucket-A
 > cluster (typer/codegen match-value-discard; doesn't fit ss3 expr/attr nor ss6 lifecycle). NOT forced
-> into a list to hit a size target (fattening hard-constraint). PA decides: mint `ss15-match-value-discard`
+> into a list to hit a size target (fattening hard-constraint). PA decides: mint `ss17-match-value-discard` (ss15/ss16 minted S214)
 > if more match-value items accrue, OR attach to ss3 only if the value-discard IIFE locus overlaps the
 > codegen-expr understanding. Decide lint (W-/I- partition) vs hard error; `Y` already fires loud
 > `E-MATCH-ARM-SEPARATOR` (same family). Repro in the 6nz inbox.

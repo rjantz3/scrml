@@ -957,6 +957,42 @@ The v0.3.0 critical-path investment. Five sub-waves, ALL CLOSED end-to-end:
 
 ---
 
+## §9.8 Scoped CSS — native `@scope`, no Tailwind required (SPEC §9.1 DQ-7 / §25.6)
+
+scrml has first-class **scoped CSS** independent of Tailwind. A `#{...}` CSS block **inside a component** compiles to a native CSS `@scope` block keyed to the component — **class names are NOT mangled**, the emitted CSS is 1:1 human-readable, and styles do not leak into nested components (implicit **donut boundary**; no `:deep()` escape hatch needed).
+
+```scrml
+const Card = <div props={ label: string }>
+    #{
+        .card { padding: 16px; border: 1px solid #e5e7eb; }
+        .card-title { font-weight: 600; }
+    }
+    <div class="card"><span class="card-title">${label}</span></div>
+</div>
+```
+
+Emits (verified end-to-end, S214):
+
+```css
+@scope ([data-scrml="Card"]) to ([data-scrml]) {
+    .card { padding: 16px; border: 1px solid #e5e7eb; }
+    .card-title { font-weight: 600; }
+}
+```
+
+…and the component root carries `data-scrml="Card"` (auto-injected — you never write it).
+
+**The three `#{}` placements (SPEC §9.1):**
+- **Inside a component** → wrapped in `@scope ([data-scrml="Name"]) to ([data-scrml])` (scoped, donut, no mangling).
+- **Flat declarations** (bare `property: value;` only, no selectors) → inline `style=""` on the element; not in the `.css` file.
+- **Program-level `#{}`** (top of `<program>`, no component) → global CSS, unwrapped.
+
+Also available: `<style>` blocks (§9.2), plain `.css` files (§9.3), and **CSS variable syntax** (§25) — write `name = value` (compiles to `--name: value`) and `prop: name fallback` (compiles to `var(--name, fallback)`); the `--` / `var()` are compiler-generated. Tailwind utilities (§26) live OUTSIDE `@scope` and are never wrapped.
+
+> **Currency note (S214).** SPEC §9.1 / §25.6 still use pre-v0.next "state type constructor" vocabulary + a stale worked example (manual lowercase `data-scrml="card"`); the live behavior is **component-keyed** with an **auto-injected** `data-scrml="Card"` (verified above). A SPEC §9/§25.6 currency pass is owed. **Known papercut:** `W-TAILWIND-UNRECOGNIZED-CLASS` false-fires on class names defined in your own in-scope `#{}` block (the lint only knows Tailwind utilities) — the lint should cross-reference in-scope `#{}`-defined selectors before warning.
+
+---
+
 ## §10 stdlib — what's on the shelf (18 modules)
 
 **Important:** stdlib modules are **import-only**, not standalone-compile targets. Don't try to compile `stdlib/<x>/index.scrml` directly — it's designed to be imported into a `<program>`.
