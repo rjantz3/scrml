@@ -17,7 +17,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 0 |
 | MED | 10 |
-| LOW | 15 |
+| LOW | 16 |
 | Nominal (spec-ahead-of-impl) | 8 |
 <!-- @generated:gap-counts END -->
 
@@ -391,6 +391,9 @@ The bare-reference event-handler form `onclick=handler` (a bare identifier, no p
 
 ### g-tailwind-lint-false-fires-on-scoped-class — `W-TAILWIND-UNRECOGNIZED-CLASS` fires on a class name the author DEFINED in their own in-scope `#{}` CSS block (the lint only knows Tailwind utilities) → spurious advisory noise on every scoped-CSS-without-Tailwind component — `NEW S214; LOW; OPEN`
 The Tailwind utility-class lint (`compiler/src/tailwind-classes.js`, surfaced via `api.js`) warns on any `class="…"` token that is not a recognized Tailwind utility — but it does NOT cross-reference the selectors the author defined in an in-scope `#{}` CSS block (SPEC §9.1 / §25.6 scoped CSS). So the moment you use scoped CSS with custom class names (the canonical without-Tailwind styling path), every such class draws a spurious `W-TAILWIND-UNRECOGNIZED-CLASS` — and the lint message even suggests the `#{}` shim you already wrote. **Empirically confirmed S214** (`/tmp/css-dogfood.scrml`, HEAD `dd5331e2`): a `const Card` with `#{ .card {…} .card-title {…} }` + `<div class="card"><span class="card-title">…` compiles clean and CORRECTLY emits `@scope ([data-scrml="Card"]) to ([data-scrml])` (scoped CSS works end-to-end), yet `card` + `card-title` each draw `W-TAILWIND-UNRECOGNIZED-CLASS`. Advisory only — green compile, correct output; pure NOISE. **Fix direction:** the lint should collect the selector class-names defined in in-scope `#{}` / `<style>` blocks (component-scope + program-scope) and exclude them from the unrecognized-class warning (the same set the `@scope` emitter already resolves). Scope: a pre-pass collecting `#{}` / `<style>` `.class` selectors, threaded into the tailwind-class lint's known-set. **Reporter:** PA scoped-CSS dog-food (S214 — the "is scoped CSS without Tailwind in good shape?" verification). The feature is solid; this is the one ergonomic wart on it. <!-- @gap id=g-tailwind-lint-false-fires-on-scoped-class sev=LOW status=open -->
+
+### g-typer-render-call-not-in-builtin-allowlist — bare `render()` with NO user `function render` fires a spurious `E-SCOPE-001` in the typer (the call-form `render` builtin is not a typer global, though codegen lowers it fine) — `NEW S214 (sPA ss16 residual); LOW; OPEN`
+Surfaced by sPA ss16 while fixing C3 (render-builtin shadowing). The `render()` client component-render builtin is lowered correctly by codegen, but the typer's scope-checker does NOT register `render` as a builtin global → a bare `render()` call with no user `function render` in scope fires a spurious `E-SCOPE-001`. Orthogonal to C3 (the PongAI/adopter cluster always has a user `function render` in scope, so it never hit this — C3 fixed the shadowing case). **Fix direction:** register `render` in the typer's builtin-allowlist, mirroring the C1/`animationFrame` allowlist class (`LOGIC_SCOPE_GLOBAL_ALLOWLIST`, `compiler/src/type-system.ts`). Pre-existing diagnostic-coverage gap. **Reporter:** sPA ss16 (re-integration residual). <!-- @gap id=g-typer-render-call-not-in-builtin-allowlist sev=LOW status=open -->
 
 ---
 
