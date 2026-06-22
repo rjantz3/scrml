@@ -1,9 +1,9 @@
-<!-- @digest head=b3a8c9fd delta-seq=15 -->
+<!-- @digest head=46f2c56f delta-seq=9 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `b3a8c9fd`** + delta-log **[15]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `b3a8c9fd`
+> **HEAD `46f2c56f`** + delta-log **[9]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `46f2c56f`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,23 +13,23 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `b3a8c9fd`
-- **HIGH 0** · MED 9 · LOW 13 · Nominal 8
+## Board — from `@gap` tokens @ `46f2c56f`
+- **HIGH 0** · MED 10 · LOW 14 · Nominal 8
 - Named open HIGHs: _none_
 
-## Recent rulings — last 1 `rule` (delta-log S212 — 2026-06-21)
-- `[15]` rule · **g-block-match-in-lift RULED (b) targeted diagnostic (user "(b) targeted diagnostic, steer to <each>").** Block-`<match>` inside `${for…lift}` → emit a NEW tar… → known-gaps g-block-match-in-lift
+## Recent rulings — last 1 `rule` (delta-log S213 — 2026-06-22)
+- `[9]` rule/state · **C3/C4/C5 ALL ROOT-CAUSED (next session).** C3 emit-expr:1726 render-hijack→mirror `log` shadowing. C4 ==-vs-payload-variant-ctor always-false→lint. C5 dot-var… → hand-off OPEN
 
 ## Recent activity — last 6 `disp`/`land`/`find`/`state`
-- `[9]` land · **A2 W4 (codegen) FINISHED + (b) honesty-lint (user "finish W4" → "b, then commit and push").** PA-direct salvage apply off current main (zero drift, 3-way clea… → SPEC §60 + type-system.ts + emit-reactive-wiring.ts
-- `[10]` find/file · **2 NEW flogence dogfood bugs (arrived mid-W4) S138-CONFIRMED on 8dba968e + filed (board HIGH 0→1, MED 10→11, §S212).** (a) g-match-arm-drops-reactive-attr-clas… → known-gaps §S212
-- `[11]` disp · **2 fix dispatches (parallel, user "dispatch both fixes") — scrml-js-codegen-engineer, isolation:worktree, opus, base session-start 6d8a47ab→merge origin/main 0… → 2 BRIEF.md + agents a0f78a14/abab18f3
-- `[12]` land · **flogence Bug A (bare-ref event handler) LANDED (S67 file-delta, agent abab18f3 @2b1df186==FINAL).** Agent based off ORIGIN 8dba968e (my filing 09cc6b21 unpush… → known-gaps + (commit)
-- `[13]` land · **flogence Bug B (match-arm reactive-attr/class effects) LANDED (S67, agent a0f78a14 @9fb58e81==FINAL).** CLOBBER HAZARD handled (agent-self-flagged): base 09cc… → known-gaps + (commit after full-suite)
-- `[14]` disp/land · **sPA ss4 (block-splitter-native-parser) RE-INTEGRATED (user "integrate ss4").** S83-verified (tip 17c559c4==reported, base 3d311fc9, 3 source/test files DISJOI… → 09f30e00 + known-gaps
+- `[4]` land · **PongAI C1 `acec6c10` + C2 `85881459`.** C1: `animationFrame` missing from LOGIC_SCOPE_GLOBAL_ALLOWLIST → spurious E-SCOPE-001 (compiler's own fixture red). C2… → acec6c10 + 85881459
+- `[5]` find/file/disp · **`<request>` `<#id>` render-bridge (HIGH) `4118ef4d`.** `<request>` fetch+decode into `_scrml_request_<id>` but `<#id>` refs read an unpopulated input-state re… → 4118ef4d + BRIEF
+- `[6]` land · **mid-session PUSH `9a4950f3`** (g-block-match + deep-walk + C1 + C2 + render-bridge-gap-filing + deputy-maint merge; coherence 0/0, deputy^main==0, S205 gate h… → origin 9a4950f3
+- `[7]` land · **render-bridge FIXED `fec0a054` (merge).** agent a7ebad43 (13 src files): `_scrml_request_<id>` now `_scrml_deep_reactive`; `<#id>` refs route to it (interp/if… → fec0a054
+- `[8]` land · **A2 §60 Nominal→Implemented + examples/32 + B-docs `46f2c56f` (user "banner now").** Held W5 trio landed (render bridge wired); §60 3-way onto §34; SPEC-INDEX… → 46f2c56f
+- `[9]` rule/state · **C3/C4/C5 ALL ROOT-CAUSED (next session).** C3 emit-expr:1726 render-hijack→mirror `log` shadowing. C4 ==-vs-payload-variant-ctor always-false→lint. C5 dot-var… → hand-off OPEN
 
 ## State
-- Version: 0.7.0 · maps: 8 commits behind HEAD (watermark 8ddc8448, HEAD b3a8c9fd)
+- Version: 0.7.0 · maps: 22 commits behind HEAD (watermark 8ddc8448, HEAD 46f2c56f)
 - Recent wraps:
   - ca712295 chore(s212): wrap-finalize — recent-sessions + digest regen at settled HEAD e4c33498
   - 0a605d3e chore(s210): wrap-finalize — recent-sessions + digest regen at settled HEAD 4a67f5bb
