@@ -118,3 +118,9 @@ Keeps par 36 render-once semantics intact (only <request> ids become reactive).
   <#feed>.data }` emits `var _scrml_request_feed = _scrml_deep_reactive(...)` (hoisted)
   THEN `const snapshot = _scrml_request_feed.data` — no `undefined.data` module-init throw.
   Request tests 11/0; interp+match+if= all green + valid JS.
+
+- REGRESSION TESTS DONE: compiler/tests/unit/request-id-render-bridge.test.js (20 tests):
+  §1 deep-reactive state + no _scrml_notify (url= AND api=); §2 interp routing+effect-wrap;
+  §3 match-on routing+effect-wrap; §4 if= member-preserved+routed+effect-wrap+GREEN;
+  §5 const routed+hoisted (decl-before-read, exactly-once); §6 §36 input-state UNCHANGED
+  (cursor stays registry); §7 every form parses. 20/0 local.
