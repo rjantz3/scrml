@@ -359,11 +359,19 @@ function resolveOnExpr(
       };
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { emitExpr } = require("./emit-expr.ts") as {
-        emitExpr: (node: any, ctx: { mode: string }) => string;
+        emitExpr: (node: any, ctx: { mode: string; requestIds?: Set<string> | null }) => string;
       };
+      // §6.7.7 / §60.4 — route a `<#id>` request ref in the `on=` expr to the
+      // reactive `_scrml_request_<id>` object (the deep-reactive Proxy the match
+      // dispatch effect auto-tracks), not the §36 input-state registry.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { collectRequestIds } = require("./reactive-deps.ts") as {
+        collectRequestIds: (fileAST: any) => Set<string>;
+      };
+      const _requestIds = fileAST ? collectRequestIds(fileAST) : new Set<string>();
       const filePath = (fileAST?.filePath as string | undefined) ?? `<match-on:${matchBlock.id}>`;
       const onNode = parseExprToNode(innerExpr, filePath, 0);
-      if (onNode) loweredAccessor = emitExpr(onNode, { mode: "client" });
+      if (onNode) loweredAccessor = emitExpr(onNode, { mode: "client", ...(_requestIds.size > 0 ? { requestIds: _requestIds } : {}) });
     } catch (_e) {
       // Leave loweredAccessor = innerExpr (verbatim fallback).
     }

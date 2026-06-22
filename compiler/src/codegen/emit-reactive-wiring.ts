@@ -285,8 +285,12 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
   // §59 (D4) — value-native MAP variable names in the file's scope. Threaded
   // into `emit-logic` via `EmitLogicOpts.mapVarNames` so emit-expr intercepts
   // `@m[k]` reads / `@m.<method>(…)` calls / `@m.size`. Sibling to engineVarNames.
-  const { collectMapVarNames, collectOrderedMapVarNames } = require("./reactive-deps.ts");
+  const { collectMapVarNames, collectOrderedMapVarNames, collectRequestIds } = require("./reactive-deps.ts");
   const mapVarNames: Set<string> = collectMapVarNames(fileAST);
+  // §6.7.7 / §60.4 — `<request>` id set. Threaded into `emit-logic` via
+  // `EmitLogicOpts.requestIds` so emit-expr routes a `<#id>` request ref to the
+  // reactive `_scrml_request_<id>` object (not the §36 input-state registry).
+  const requestIds: Set<string> = collectRequestIds(fileAST);
   // §59.8 (S169) — the STRICT `@ordered`-typed subset of `mapVarNames`. Threaded
   // into `emit-logic` via `EmitLogicOpts.orderedMapVarNames` so emit-expr lowers
   // a reassignment `@m = [...]` to an ordered cell ordered. Sibling to mapVarNames.
@@ -336,9 +340,9 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
   // yet still declare synth cells, and the `@<compound>.<synthProp>` read must
   // still route. Only spread when non-empty to keep emitOpts lean.
   const synthCellKeysSpread = synthCellKeys.size > 0 ? { synthCellKeys } : {};
-  const emitOpts: { derivedNames?: Set<string>; synthCellKeys?: Set<string>; encodingCtx?: typeof encodingCtx; machineBindings?: typeof machineBindings; engineBindings?: typeof engineBindings; mapVarNames?: Set<string>; orderedMapVarNames?: Set<string>; engineVarNames?: Set<string>; enginesWithHooks?: Set<string>; enginesWithOnTimeout?: Set<string>; enginesWithIdleWatchdog?: Set<string>; enginesWithInternalRules?: Set<string>; enginesWithHistory?: Set<string>; enginesWithMessageArms?: Set<string>; engineMessageVariants?: Map<string, Set<string>>; fnBodyRegistry?: FunctionBodyRegistry; typeRegistry?: Map<string, any> | null; errors?: typeof errors } = derivedNames.size > 0
-    ? { derivedNames, ...synthCellKeysSpread, encodingCtx, fnBodyRegistry, errors, ...(typeRegistry ? { typeRegistry } : {}), ...(machineBindings ? { machineBindings } : {}), ...(engineBindings ? { engineBindings } : {}), ...(mapVarNames.size > 0 ? { mapVarNames } : {}), ...(orderedMapVarNames.size > 0 ? { orderedMapVarNames } : {}), ...(engineVarNames.size > 0 ? { engineVarNames } : {}), ...(enginesWithHooks.size > 0 ? { enginesWithHooks } : {}), ...(enginesWithOnTimeout.size > 0 ? { enginesWithOnTimeout } : {}), ...(enginesWithIdleWatchdog.size > 0 ? { enginesWithIdleWatchdog } : {}), ...(enginesWithInternalRules.size > 0 ? { enginesWithInternalRules } : {}), ...(enginesWithHistory.size > 0 ? { enginesWithHistory } : {}), ...(enginesWithMessageArms.size > 0 ? { enginesWithMessageArms } : {}), ...(engineMessageVariants.size > 0 ? { engineMessageVariants } : {}) }
-    : { ...synthCellKeysSpread, encodingCtx, fnBodyRegistry, errors, ...(typeRegistry ? { typeRegistry } : {}), ...(machineBindings ? { machineBindings } : {}), ...(engineBindings ? { engineBindings } : {}), ...(mapVarNames.size > 0 ? { mapVarNames } : {}), ...(orderedMapVarNames.size > 0 ? { orderedMapVarNames } : {}), ...(engineVarNames.size > 0 ? { engineVarNames } : {}), ...(enginesWithHooks.size > 0 ? { enginesWithHooks } : {}), ...(enginesWithOnTimeout.size > 0 ? { enginesWithOnTimeout } : {}), ...(enginesWithIdleWatchdog.size > 0 ? { enginesWithIdleWatchdog } : {}), ...(enginesWithInternalRules.size > 0 ? { enginesWithInternalRules } : {}), ...(enginesWithHistory.size > 0 ? { enginesWithHistory } : {}), ...(enginesWithMessageArms.size > 0 ? { enginesWithMessageArms } : {}), ...(engineMessageVariants.size > 0 ? { engineMessageVariants } : {}) };
+  const emitOpts: { derivedNames?: Set<string>; synthCellKeys?: Set<string>; encodingCtx?: typeof encodingCtx; machineBindings?: typeof machineBindings; engineBindings?: typeof engineBindings; mapVarNames?: Set<string>; requestIds?: Set<string>; orderedMapVarNames?: Set<string>; engineVarNames?: Set<string>; enginesWithHooks?: Set<string>; enginesWithOnTimeout?: Set<string>; enginesWithIdleWatchdog?: Set<string>; enginesWithInternalRules?: Set<string>; enginesWithHistory?: Set<string>; enginesWithMessageArms?: Set<string>; engineMessageVariants?: Map<string, Set<string>>; fnBodyRegistry?: FunctionBodyRegistry; typeRegistry?: Map<string, any> | null; errors?: typeof errors } = derivedNames.size > 0
+    ? { derivedNames, ...synthCellKeysSpread, encodingCtx, fnBodyRegistry, errors, ...(typeRegistry ? { typeRegistry } : {}), ...(machineBindings ? { machineBindings } : {}), ...(engineBindings ? { engineBindings } : {}), ...(mapVarNames.size > 0 ? { mapVarNames } : {}), ...(requestIds.size > 0 ? { requestIds } : {}), ...(orderedMapVarNames.size > 0 ? { orderedMapVarNames } : {}), ...(engineVarNames.size > 0 ? { engineVarNames } : {}), ...(enginesWithHooks.size > 0 ? { enginesWithHooks } : {}), ...(enginesWithOnTimeout.size > 0 ? { enginesWithOnTimeout } : {}), ...(enginesWithIdleWatchdog.size > 0 ? { enginesWithIdleWatchdog } : {}), ...(enginesWithInternalRules.size > 0 ? { enginesWithInternalRules } : {}), ...(enginesWithHistory.size > 0 ? { enginesWithHistory } : {}), ...(enginesWithMessageArms.size > 0 ? { enginesWithMessageArms } : {}), ...(engineMessageVariants.size > 0 ? { engineMessageVariants } : {}) }
+    : { ...synthCellKeysSpread, encodingCtx, fnBodyRegistry, errors, ...(typeRegistry ? { typeRegistry } : {}), ...(machineBindings ? { machineBindings } : {}), ...(engineBindings ? { engineBindings } : {}), ...(mapVarNames.size > 0 ? { mapVarNames } : {}), ...(requestIds.size > 0 ? { requestIds } : {}), ...(orderedMapVarNames.size > 0 ? { orderedMapVarNames } : {}), ...(engineVarNames.size > 0 ? { engineVarNames } : {}), ...(enginesWithHooks.size > 0 ? { enginesWithHooks } : {}), ...(enginesWithOnTimeout.size > 0 ? { enginesWithOnTimeout } : {}), ...(enginesWithIdleWatchdog.size > 0 ? { enginesWithIdleWatchdog } : {}), ...(enginesWithInternalRules.size > 0 ? { enginesWithInternalRules } : {}), ...(enginesWithHistory.size > 0 ? { enginesWithHistory } : {}), ...(enginesWithMessageArms.size > 0 ? { enginesWithMessageArms } : {}), ...(engineMessageVariants.size > 0 ? { engineMessageVariants } : {}) };
 
   // Step 4a: Generate transition lookup tables for enums with transitions{} and machines (§51.5).
   // These must be emitted BEFORE top-level logic statements because state-decl
@@ -393,6 +397,32 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
   // Always re-collect (don't use pre-computed analysis.topLevelLogic) because
   // generateHtml annotates logic nodes with _placeholderId which must be propagated
   // to children for lift-target routing.
+  // §6.7.7 — HOIST the `<request>` state-object declarations to BEFORE top-level
+  // logic. The render bridge routes a file-scope `const <x> = <#id>.data` (and
+  // interpolation/match/if reads) to `_scrml_request_<id>`, but the full request
+  // init (Step 5c) is emitted AFTER top-level logic. Since `var` hoists only the
+  // binding (not the assignment), a module-init read of `_scrml_request_<id>.data`
+  // before its assignment would throw `undefined.data`. Emit the deep-reactive
+  // state object early so the binding is initialized before any file-scope read.
+  // The fetch fn + invocation + seq/mounted vars stay in Step 5c (they are only
+  // read by the late-emitted fetch fn, and the deps=/args= effect must run after
+  // the cells it reads are set by top-level logic).
+  const _hoistRequestNodes = classifyMarkupNodes(getNodes(fileAST)).requestNodes;
+  if (_hoistRequestNodes.length > 0) {
+    const hoistedIds = new Set<string>();
+    for (const rqNode of _hoistRequestNodes) {
+      const rqId = extractRequestId(rqNode);
+      if (rqId && !hoistedIds.has(rqId)) {
+        hoistedIds.add(rqId);
+        if (hoistedIds.size === 1) {
+          lines.push("");
+          lines.push("// --- request state objects (§6.7.7, hoisted for module-init reads) ---");
+        }
+        lines.push(`var _scrml_request_${rqId} = _scrml_deep_reactive({ loading: true, data: null, error: null, stale: false });`);
+      }
+    }
+  }
+
   const topLevel = collectTopLevelLogicStatements(fileAST);
 
   // Group statements by placeholder ID so sibling statements from the same logic
@@ -1140,6 +1170,19 @@ function emitApiUrlExpr(base: string, path: string, argsVar: string): string {
 // Request node emission (§6.7.7)
 // ---------------------------------------------------------------------------
 
+function extractRequestId(node: any): string | null {
+  const attrs: any[] = node.attrs ?? node.attributes ?? [];
+  for (const a of attrs) {
+    if (a?.name !== "id") continue;
+    const v = a.value;
+    if (v?.kind === "string-literal" && typeof v.value === "string") return v.value;
+    if (v?.kind === "variable-ref") return (v.name ?? "").replace(/^@/, "");
+    if (typeof v === "string") return v;
+    if (typeof v?.value === "string") return v.value;
+  }
+  return null;
+}
+
 function emitRequestNode(node: any, errors: CGError[], filePath: string, apiEndpoints: Map<string, ApiEndpointForEmit>): string[] {
   const lines: string[] = [];
   const attrs: any[] = node.attrs ?? node.attributes ?? [];
@@ -1196,7 +1239,7 @@ function emitRequestNode(node: any, errors: CGError[], filePath: string, apiEndp
     const carriesBody = method === "POST" || method === "PUT" || method === "PATCH";
 
     lines.push(`// <request id="${requestId}" api="${endpointName}"> (§60.4 — typed external API)`);
-    lines.push(`var ${stateVar} = { loading: true, data: null, error: null, stale: false };`);
+    lines.push(`// ${stateVar} declared+initialized in the hoisted request-state pass above (§6.7.7).`);
     lines.push(`var ${seqVar} = 0;`);
     lines.push(`var ${mountedVar} = true;`);
     lines.push(`async function ${fetchFn}() {`);
@@ -1211,7 +1254,6 @@ function emitRequestNode(node: any, errors: CGError[], filePath: string, apiEndp
     lines.push(`  ${stateVar}.loading = true;`);
     lines.push(`  ${stateVar}.error = null;`);
     lines.push(`  if (${stateVar}.data !== null) { ${stateVar}.stale = true; }`);
-    lines.push(`  _scrml_notify(${JSON.stringify(requestId)});`);
     lines.push(`  try {`);
     // Request init: method always; body for body-carrying methods (the args
     // object serialized as JSON, §60.4 — the args value IS the request shape).
@@ -1250,7 +1292,6 @@ function emitRequestNode(node: any, errors: CGError[], filePath: string, apiEndp
     lines.push(`  }`);
     lines.push(`  ${stateVar}.loading = false;`);
     lines.push(`  ${stateVar}.stale = false;`);
-    lines.push(`  _scrml_notify(${JSON.stringify(requestId)});`);
     lines.push(`}`);
     lines.push(`${stateVar}.refetch = ${fetchFn};`);
     lines.push(`_scrml_register_cleanup(function() { ${mountedVar} = false; });`);
@@ -1315,7 +1356,7 @@ function emitRequestNode(node: any, errors: CGError[], filePath: string, apiEndp
   const mountedVar = `_scrml_request_${requestId}_mounted`;
 
   lines.push(`// <request id="${requestId}">`);
-  lines.push(`var ${stateVar} = { loading: true, data: null, error: null, stale: false };`);
+    lines.push(`// ${stateVar} declared+initialized in the hoisted request-state pass above (§6.7.7).`);
   lines.push(`var ${seqVar} = 0;`);
   lines.push(`var ${mountedVar} = true;`);
   lines.push(`async function ${fetchFn}() {`);
@@ -1323,7 +1364,6 @@ function emitRequestNode(node: any, errors: CGError[], filePath: string, apiEndp
   lines.push(`  ${stateVar}.loading = true;`);
   lines.push(`  ${stateVar}.error = null;`);
   lines.push(`  if (${stateVar}.data !== null) { ${stateVar}.stale = true; }`);
-  lines.push(`  _scrml_notify(${JSON.stringify(requestId)});`);
   lines.push(`  try {`);
   lines.push(`    var _res = await fetch(${urlExpr}, { method: ${JSON.stringify(method)} });`);
   lines.push(`    if (!_res.ok) throw new Error("HTTP " + _res.status);`);
@@ -1336,7 +1376,6 @@ function emitRequestNode(node: any, errors: CGError[], filePath: string, apiEndp
   lines.push(`  }`);
   lines.push(`  ${stateVar}.loading = false;`);
   lines.push(`  ${stateVar}.stale = false;`);
-  lines.push(`  _scrml_notify(${JSON.stringify(requestId)});`);
   lines.push(`}`);
   lines.push(`${stateVar}.refetch = ${fetchFn};`);
   lines.push(`_scrml_register_cleanup(function() { ${mountedVar} = false; });`);

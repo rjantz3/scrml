@@ -122,6 +122,12 @@ export interface LogicBinding {
   placeholderId?: string;
   expr?: string;
   reactiveRefs?: Set<string>;
+  /**
+   * §6.7.7 — the binding expr reads a `<#id>` ref whose id names a `<request>`
+   * (reactive `_scrml_request_<id>` deep-reactive Proxy). Forces the
+   * `_scrml_effect`-wrapped path in emit-event-wiring even with no `@var` dep.
+   */
+  hasRequestRef?: boolean;
   isConditionalDisplay?: boolean;
   isVisibilityToggle?: boolean;
 

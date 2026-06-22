@@ -129,7 +129,7 @@ describe("<api> codegen — per-endpoint typed fetch (§60.4), variant decode (�
 
   test("the <request> exposes the §6.7.7 reactive surface (loading/data/error/stale + refetch + seq-guard)", () => {
     const js = clientJs(compile(VARIANT_APP));
-    expect(js).toContain(`var _scrml_request_profile = { loading: true, data: null, error: null, stale: false };`);
+    expect(js).toContain(`var _scrml_request_profile = _scrml_deep_reactive({ loading: true, data: null, error: null, stale: false });`);
     expect(js).toContain(`_scrml_request_profile.refetch = _scrml_request_profile_fetch;`);
     // EC-2 superseding-fetch sequence guard (§6.7.7).
     expect(js).toContain(`var _scrml_request_profile_seq = 0;`);
