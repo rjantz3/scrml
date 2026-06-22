@@ -25,6 +25,7 @@
 
 import { resolve, dirname, join } from "path";
 import { existsSync } from "fs";
+import { fileURLToPath } from "url";
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -700,7 +701,12 @@ export function resolveModules(fileASTs) {
  * The root directory for stdlib modules.
  * `scrml:crypto` resolves to `<STDLIB_ROOT>/crypto/index.scrml` or `<STDLIB_ROOT>/crypto.scrml`.
  */
-const STDLIB_ROOT = resolve(dirname(new URL(import.meta.url).pathname), "../../stdlib");
+// PongAI C2 (S213): use fileURLToPath, NOT the `URL(...).pathname` form —
+// on Windows the latter yields `/C:/…` (leading slash, drive inline), which
+// `path.resolve` treats as relative and prepends the cwd drive → `C:\C:\…`,
+// making the whole `scrml:` stdlib unresolvable (E-IMPORT-006). fileURLToPath
+// yields a correct native path on both platforms.
+const STDLIB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../stdlib");
 
 /**
  * Resolve a module path relative to the importing file.

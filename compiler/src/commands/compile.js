@@ -9,6 +9,7 @@
 
 import { statSync, watch, readFileSync, existsSync, writeFileSync } from "fs";
 import { resolve, dirname, join, relative, basename } from "path";
+import { fileURLToPath } from "url";
 import { compileScrml, scanDirectory } from "../api.js";
 import { serializeBlockAnalysis } from "../block-analysis.ts";
 
@@ -799,7 +800,7 @@ export async function runCompile(args) {
   // Load self-hosted modules if requested (async, before first compilation)
   let selfHostModules = null;
   if (opts.selfHost) {
-    const compilerSrcDir = resolve(new URL(import.meta.url).pathname, "..", "..");
+    const compilerSrcDir = resolve(fileURLToPath(import.meta.url), "..", "..");
     try {
       selfHostModules = await loadSelfHostModules(compilerSrcDir);
       const loadedModules = ["module-resolver", "meta-checker"];

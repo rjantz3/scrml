@@ -30,6 +30,7 @@
 import { walkFileAst } from "./ast-walk.ts";
 import type { FileAST, Span } from "../types/ast.ts";
 import { resolve, dirname } from "path";
+import { fileURLToPath } from "url";
 
 /**
  * The stdlib root absolute path — files under this directory are exempt from
@@ -42,7 +43,7 @@ import { resolve, dirname } from "path";
  *   → `../../..` = `<repo>`
  *   → `../../../stdlib` = `<repo>/stdlib`
  */
-const STDLIB_ROOT = resolve(dirname(new URL(import.meta.url).pathname), "../../../stdlib");
+const STDLIB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../../stdlib");
 
 /** Trailing slash sentinel so `foo/stdlibSidecar/` doesn't false-match `foo/stdlib`. */
 const STDLIB_ROOT_PREFIX = STDLIB_ROOT.endsWith("/") ? STDLIB_ROOT : STDLIB_ROOT + "/";
