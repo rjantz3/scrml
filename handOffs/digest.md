@@ -1,9 +1,9 @@
-<!-- @digest head=46f2c56f delta-seq=9 -->
+<!-- @digest head=d4d489bf delta-seq=9 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `46f2c56f`** + delta-log **[9]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `46f2c56f`
+> **HEAD `d4d489bf`** + delta-log **[9]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `d4d489bf`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,7 +13,7 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `46f2c56f`
+## Board — from `@gap` tokens @ `d4d489bf`
 - **HIGH 0** · MED 10 · LOW 14 · Nominal 8
 - Named open HIGHs: _none_
 
@@ -29,11 +29,11 @@
 - `[9]` rule/state · **C3/C4/C5 ALL ROOT-CAUSED (next session).** C3 emit-expr:1726 render-hijack→mirror `log` shadowing. C4 ==-vs-payload-variant-ctor always-false→lint. C5 dot-var… → hand-off OPEN
 
 ## State
-- Version: 0.7.0 · maps: 22 commits behind HEAD (watermark 8ddc8448, HEAD 46f2c56f)
+- Version: 0.7.0 · maps: 2 commits behind HEAD (watermark fec0a054, HEAD d4d489bf)
 - Recent wraps:
+  - d4d489bf chore(s213): wrap bookkeeping — hand-off close + delta-log + gaps + §0/digest + BRIEFs
   - ca712295 chore(s212): wrap-finalize — recent-sessions + digest regen at settled HEAD e4c33498
   - 0a605d3e chore(s210): wrap-finalize — recent-sessions + digest regen at settled HEAD 4a67f5bb
-  - 28de9c81 wrap(s209): close — crash-recovered; despace arc + 7-sPA wave + cPA correction + B/C; ss4/ss13/DD-verdict to next PA
 
 ## NOT in the digest (read source for these)
 - Open questions awaiting you → `hand-off.md` §"OPEN THREADS / Open questions"
