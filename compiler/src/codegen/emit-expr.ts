@@ -78,6 +78,23 @@ export function setLogShadowedInFile(on: boolean): void {
   _logShadowedInFile = !!on;
 }
 
+// ss16 C3 (mirror §20.6 log-shadowing) — PER-FILE flag: does the current file
+// declare a `function render` / `fn render`? Such a declaration shadows the
+// `render()` client component-render builtin across the whole file. Without
+// this, the builtin hijack at the call site (`render(...)` → `_scrml_render`)
+// short-circuits the §47 user-fn name-encoding + fnNameMap post-pass, so the
+// user's `function render` def (emitted `_scrml_render_1`) and its call site
+// (`_scrml_render`, defined nowhere) MISMATCH → ReferenceError. Set per-file
+// by runCG (via fileDeclaresRender). A LOCAL `let render` / param is handled
+// scope-precisely via EmitExprContext.declaredNames; this covers the
+// file-level function-decl that declaredNames does not carry.
+let _renderShadowedInFile = false;
+
+/** Set the per-file render() shadowing flag (a file-level `function render`). */
+export function setRenderShadowedInFile(on: boolean): void {
+  _renderShadowedInFile = !!on;
+}
+
 
 // ---------------------------------------------------------------------------
 // EmitExprContext — threaded through every emit call
@@ -1722,9 +1739,23 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
     return `_scrml_navigate(${args})`;
   }
 
-  // render() → client-side component render
+  // render() → client-side component render.
+  // ss16 C3 (mirror §20.6 log-shadowing): a user-declared `render` in scope
+  // WINS — the builtin steps aside and the call is emitted via the generic
+  // call path so the §47 user-fn name-encoding + fnNameMap post-pass rewrites
+  // it (`render` → `_scrml_render_1`), matching the user's `function render`
+  // def. Without this, the hijack emits `_scrml_render` directly, which the
+  // post-pass's word-boundary regex `\b(render)\b` CANNOT match (no boundary
+  // before `render` after the `_`) → call never repaired → def/call mismatch
+  // → ReferenceError. The info-level W-RENDER-SHADOWED diagnostic is fired at
+  // the shadowing declaration by the type pass (`checkRenderShadowing`).
   if (node.callee.kind === "ident" && node.callee.name === "render") {
-    return `_scrml_render(${args})`;
+    const userDeclaredRender = _renderShadowedInFile || !!(ctx.declaredNames && ctx.declaredNames.has("render"));
+    if (!userDeclaredRender) {
+      return `_scrml_render(${args})`;
+    }
+    // Fall through to the generic call path below (callee === "render", which
+    // the fnNameMap post-pass rewrites to the user fn's encoded name).
   }
 
   // §20.6 — log() location-transparent logging builtin.

@@ -119,8 +119,14 @@ function baseName(p: string): string {
 
 const _FN_DECL_KINDS = new Set(["function-decl", "fn-decl", "function", "fn"]);
 
-/** True when the file declares a `function log` / `fn log` (any scope). */
-export function fileDeclaresLog(fileAST: unknown): boolean {
+/**
+ * True when the file declares a `function <name>` / `fn <name>` (any scope).
+ * Generalised from `fileDeclaresLog` (ss16 C3) so the same builtin-shadowing
+ * detection serves both `log` (§20.6) and `render` (the client component-render
+ * builtin). File-scope functions are in scope across the whole file, so a
+ * top-level decl named `<name>` shadows the same-named builtin everywhere.
+ */
+export function fileDeclaresFn(fileAST: unknown, name: string): boolean {
   const seen = new WeakSet<object>();
   let found = false;
   function walk(node: unknown): void {
@@ -128,7 +134,7 @@ export function fileDeclaresLog(fileAST: unknown): boolean {
     if (seen.has(node as object)) return;
     seen.add(node as object);
     const n = node as Record<string, unknown>;
-    if (_FN_DECL_KINDS.has(n.kind as string) && n.name === "log") { found = true; return; }
+    if (_FN_DECL_KINDS.has(n.kind as string) && n.name === name) { found = true; return; }
     for (const key in n) {
       const v = n[key];
       if (Array.isArray(v)) { for (const c of v) walk(c); }
@@ -140,6 +146,20 @@ export function fileDeclaresLog(fileAST: unknown): boolean {
   const nodes = (root as any)?.nodes ?? (fileAST as any)?.nodes ?? [];
   for (const n of nodes) { walk(n); if (found) break; }
   return found;
+}
+
+/** True when the file declares a `function log` / `fn log` (any scope). */
+export function fileDeclaresLog(fileAST: unknown): boolean {
+  return fileDeclaresFn(fileAST, "log");
+}
+
+/**
+ * ss16 C3 — True when the file declares a `function render` / `fn render`
+ * (any scope). Such a decl shadows the `render()` client component-render
+ * builtin; the emitter yields to the user fn (mirrors `fileDeclaresLog`).
+ */
+export function fileDeclaresRender(fileAST: unknown): boolean {
+  return fileDeclaresFn(fileAST, "render");
 }
 
 // ---------------------------------------------------------------------------

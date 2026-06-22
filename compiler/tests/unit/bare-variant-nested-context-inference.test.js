@@ -313,6 +313,84 @@ describe("Gap B.4 — function call-arg", () => {
 });
 
 // ===========================================================================
+// ss16 C5 — §14.10 position-3: enum-payload-variant CONSTRUCTOR arg.
+//
+// `<mode>: Mode = .OnePlayer(.Easy)` — the ctor ARG `.Easy` must type against
+// the OnePlayer payload field type (`Difficulty`), NOT the outer enum `Mode`.
+// Before C5: the flat LHS-driven walker resolved every bare-variant ident
+// (including the ctor arg) against `Mode` → spurious E-TYPE-063 on `.Easy`.
+// New walker `inferBareVariantsAtVariantCtorArgs` recognizes the ctor callee
+// (bare `.OnePlayer` / qualified `Mode.OnePlayer` / `Mode::OnePlayer`), sources
+// the param types from `VariantDef.payload`, and dispatches each arg with the
+// right payload context.
+// ===========================================================================
+
+describe("ss16 C5 — enum-payload-variant ctor-arg bare-variant inference", () => {
+  test("C5.1 `<mode>: Mode = .OnePlayer(.Easy)` — nested ctor-arg resolves against the payload enum (no fire)", () => {
+    const src = `<program>\${
+      type Difficulty:enum = { Easy, Hard }
+      type Mode:enum = { OnePlayer(difficulty: Difficulty), TwoPlayer }
+      <mode>: Mode = .OnePlayer(.Easy)
+    }</program>`;
+    const { errors } = compile(src);
+    expect(errsByCode(errors, "E-TYPE-063").length).toBe(0);
+    expect(errsByCode(errors, "E-VARIANT-AMBIGUOUS").length).toBe(0);
+  });
+
+  test("C5.2 typo ctor arg `.OnePlayer(.Nope)` fires E-TYPE-063 against the PAYLOAD enum (Difficulty), not Mode", () => {
+    const src = `<program>\${
+      type Difficulty:enum = { Easy, Hard }
+      type Mode:enum = { OnePlayer(difficulty: Difficulty), TwoPlayer }
+      <mode>: Mode = .OnePlayer(.Nope)
+    }</program>`;
+    const { errors } = compile(src);
+    const e063 = errsByCode(errors, "E-TYPE-063");
+    expect(e063.length).toBe(1);
+    expect(e063[0].message).toContain(".Nope");
+    expect(e063[0].message).toContain("Difficulty");
+    // MUST NOT name the outer enum — that was the C5 mis-resolution.
+    expect(e063[0].message).not.toContain("declared variant of enum `Mode`");
+  });
+
+  test("C5.3 qualified ctor `Mode.OnePlayer(.Hard)` — clean", () => {
+    const src = `<program>\${
+      type Difficulty:enum = { Easy, Hard }
+      type Mode:enum = { OnePlayer(difficulty: Difficulty), TwoPlayer }
+      <mode>: Mode = Mode.OnePlayer(.Hard)
+    }</program>`;
+    const { errors } = compile(src);
+    expect(errsByCode(errors, "E-TYPE-063").length).toBe(0);
+    expect(errsByCode(errors, "E-VARIANT-AMBIGUOUS").length).toBe(0);
+  });
+
+  test("C5.4 double-colon qualified ctor `Mode::OnePlayer(.Easy)` — clean", () => {
+    const src = `<program>\${
+      type Difficulty:enum = { Easy, Hard }
+      type Mode:enum = { OnePlayer(difficulty: Difficulty), TwoPlayer }
+      <mode>: Mode = Mode::OnePlayer(.Easy)
+    }</program>`;
+    const { errors } = compile(src);
+    expect(errsByCode(errors, "E-TYPE-063").length).toBe(0);
+    expect(errsByCode(errors, "E-VARIANT-AMBIGUOUS").length).toBe(0);
+  });
+
+  test("C5.5 match-bound payload on the same shape is unaffected (no regression of the arm-field-type path)", () => {
+    const src = `<program>\${
+      type Difficulty:enum = { Easy, Hard }
+      type Mode:enum = { OnePlayer(difficulty: Difficulty), TwoPlayer }
+      <mode>: Mode = .OnePlayer(.Easy)
+      <label> = match @mode {
+        .OnePlayer(d) => "one"
+        .TwoPlayer => "two"
+      }
+    }</program>`;
+    const { errors } = compile(src);
+    expect(errsByCode(errors, "E-TYPE-063").length).toBe(0);
+    expect(errsByCode(errors, "E-VARIANT-AMBIGUOUS").length).toBe(0);
+  });
+});
+
+// ===========================================================================
 // End-to-end: examples/06-kanban-board.scrml compiles cleanly
 // (acceptance criterion from brief)
 // ===========================================================================

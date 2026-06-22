@@ -65,8 +65,8 @@ import { generateMachineTestJs } from "./emit-machine-property-tests.ts";
 import { generateWorkerJs } from "./emit-worker.ts";
 import { appendSourceMappingUrl } from "./source-map.ts";
 import { buildSourceMap } from "./build-source-map.ts";
-import { registerFileSource, resetLogLoc, fileDeclaresLog } from "./log-loc.ts";
-import { setLogProductionStrip, setLogShadowedInFile } from "./emit-expr.ts";
+import { registerFileSource, resetLogLoc, fileDeclaresLog, fileDeclaresRender } from "./log-loc.ts";
+import { setLogProductionStrip, setLogShadowedInFile, setRenderShadowedInFile } from "./emit-expr.ts";
 import { EncodingContext } from "./type-encoding.ts";
 import { collectDerivedVarNames, collectSynthCellKeys, stampCompoundDeepSetTargets } from "./reactive-deps.ts";
 import { collectTopLevelLogicStatements } from "./collect.ts";
@@ -585,6 +585,10 @@ export function runCG(input: CgInput): CgOutput {
     // §20.6 (shadowing) — a file-level `function log` shadows the builtin
     // across this whole file; the log() lowering then yields + lints.
     setLogShadowedInFile(fileDeclaresLog(fileAST));
+    // ss16 C3 — a file-level `function render` shadows the render() client
+    // component-render builtin; the render() hijack then yields to the user fn
+    // (so the §47 name-encoding + fnNameMap post-pass repairs the call site).
+    setRenderShadowedInFile(fileDeclaresRender(fileAST));
     const nodes: any[] = (fileAST as any).ast?.nodes ?? (fileAST as any).nodes ?? [];
 
     interface WorkerDef {
@@ -758,6 +762,8 @@ export function runCG(input: CgInput): CgOutput {
     // §20.6 (shadowing) — a file-level `function log` shadows the builtin
     // across this whole file; the log() lowering then yields + lints.
     setLogShadowedInFile(fileDeclaresLog(fileAST));
+    // ss16 C3 — a file-level `function render` shadows the render() builtin.
+    setRenderShadowedInFile(fileDeclaresRender(fileAST));
     const analysis = fileAnalyses.get(filePath);
     const nodes: object[] = analysis ? (analysis as any).nodes : [];
 

@@ -4054,6 +4054,58 @@ function checkLogShadowing(
 }
 
 // ---------------------------------------------------------------------------
+// ss16 C3 / W-RENDER-SHADOWED — render() builtin shadowing nudge
+// ---------------------------------------------------------------------------
+
+/**
+ * ss16 C3 (mirror §20.6.7) — A user-declared `function render` / `fn render`
+ * WINS over the `render()` client component-render builtin: the builtin steps
+ * aside and `render(...)` is emitted as an ordinary call to the user function
+ * (the §47 name-encoding + fnNameMap post-pass rewrites the call site to the
+ * encoded user-fn name, so def and call match). Rather than let that happen
+ * silently, fire an info-level `W-RENDER-SHADOWED` at the declaration so the
+ * author knows the builtin is inactive for that name.
+ *
+ * The W- prefix routes to `result.warnings` (non-fatal). `render` is NOT a
+ * reserved identifier — declaring `function render` is legal (this lint, not
+ * E-RESERVED-IDENTIFIER; the hard-reserved client identifier is `reset`).
+ * Fires once per declaration.
+ */
+function checkRenderShadowing(
+  topNodes: ASTNodeLike[],
+  errors: TSError[],
+  fileSpan: Span,
+): void {
+  const FN_KINDS = new Set(["function-decl", "fn-decl", "function", "fn"]);
+  const seen = new WeakSet<object>();
+  function walk(node: unknown): void {
+    if (!node || typeof node !== "object") return;
+    if (seen.has(node as object)) return;
+    seen.add(node as object);
+    const n = node as Record<string, unknown>;
+    if (FN_KINDS.has(n.kind as string) && n.name === "render") {
+      const span = ((n.span as Span | undefined) ?? fileSpan);
+      errors.push(new TSError(
+        "W-RENDER-SHADOWED",
+        "W-RENDER-SHADOWED: this `render` declaration shadows the `render()` " +
+        "client component-render builtin. Calls to `render(...)` resolve to THIS " +
+        "function and do NOT trigger the builtin component render. Remove this " +
+        "declaration to adopt the builtin. (`render` is not a reserved identifier; " +
+        "this is an info-level nudge, not an error.)",
+        span,
+        "info",
+      ));
+    }
+    for (const key in n) {
+      const v = n[key];
+      if (Array.isArray(v)) { for (const c of v) walk(c); }
+      else if (v && typeof v === "object") walk(v);
+    }
+  }
+  for (const node of topNodes) walk(node);
+}
+
+// ---------------------------------------------------------------------------
 // §4.18.7 / W-DISPLAY-TEXT-OVERQUOTE — over-quoted display text in a nested
 // plain-markup free-text body inside a code-default-body context
 // ---------------------------------------------------------------------------
@@ -8736,11 +8788,20 @@ function annotateNodes(
             // preventing a spurious E-VARIANT-AMBIGUOUS from the no-context
             // branch when the let-decl has no annotation.
             inferBareVariantsAtComparisonSites(initExprForScope, scopeChain, letSpan, errors);
+            // ss16 C4 (§45) — `==`/`!=` against a payload-variant ctor.
+            checkEqPayloadVariantOperands(initExprForScope, typeRegistry, letSpan, errors);
             // S84 v0.2.4 #5-followon (Gap B.4) — call-arg pre-pass. Same
             // ordering rationale as comparison-site: resolve bare variants
             // at typed-function call-arg positions before the LHS-driven
             // walk runs, so the no-context branch doesn't fire on them.
             inferBareVariantsAtCallArgs(initExprForScope, fnSignatures, letSpan, errors);
+            // ss16 C5 (§14.10 position-3) — enum-payload-variant CTOR arg
+            // pre-pass. `let m: Mode = .OnePlayer(.Easy)` (or the qualified
+            // `Mode.OnePlayer(.Easy)` form with no annotation). The ctor ARG
+            // must resolve against the payload-field type, not the LHS enum.
+            // contextType is the annotation type when present, else null (the
+            // qualified-callee form resolves the enum via the type registry).
+            inferBareVariantsAtVariantCtorArgs(initExprForScope, letAnnot ? resolvedType : null, typeRegistry, letSpan, errors);
             // B20 §14.10 / M9 — bare-variant inference at LHS let/const-decl
             // annotation. The annotation type drives bare-variant resolution
             // in the initializer. When NO annotation is present, the writer
@@ -9150,6 +9211,16 @@ function annotateNodes(
             // and the LHS-driven walker skips them (preventing the
             // duplicate-fire that the stamp convention was designed for).
             inferBareVariantsAtComparisonSites(reactInitExprNode, scopeChain, reactSpan, errors);
+            // ss16 C4 (§45) — `==`/`!=` against a payload-variant ctor
+            // (`@phase == Phase.Serving`) — always-false silent branch.
+            checkEqPayloadVariantOperands(reactInitExprNode, typeRegistry, reactSpan, errors);
+            // ss16 C5 (§14.10 position-3) — enum-payload-variant CTOR arg
+            // pre-pass. `<mode>: Mode = .OnePlayer(.Easy)` — the ctor ARG
+            // `.Easy` must resolve against the OnePlayer payload type
+            // (`Difficulty`), NOT the outer enum `Mode`. Runs BEFORE the
+            // struct-nav/flat walker so the stamp it sets makes the flat
+            // walker (which carries the outer `bvCtxType`) skip the arg.
+            inferBareVariantsAtVariantCtorArgs(reactInitExprNode, bvCtxType, typeRegistry, reactSpan, errors);
             // S84 v0.2.4 #4.5: struct-nav walker handles array-of-struct and
             // struct contextTypes (e.g. the kanban shape
             // `<cards>: { id, title, status: Status }[] = [...]`).
@@ -9348,9 +9419,17 @@ function annotateNodes(
             // helper handles assign/call ROOT shapes only and does not visit
             // binary-expr nodes; this helper covers the disjoint case.
             inferBareVariantsAtComparisonSites(beExprNode, scopeChain, beSpan, errors);
+            // ss16 C4 (§45) — `==`/`!=` against a payload-variant ctor.
+            checkEqPayloadVariantOperands(beExprNode, typeRegistry, beSpan, errors);
             // S84 v0.2.4 #5-followon (Gap B.4) — call-arg inference at
             // bare-expr top-level (e.g. `applyState(.V)` as its own stmt).
             inferBareVariantsAtCallArgs(beExprNode, fnSignatures, beSpan, errors);
+            // ss16 C5 (§14.10 position-3) — qualified enum-payload-variant
+            // CTOR arg at bare-expr (`Mode.OnePlayer(.Easy)` as a statement).
+            // No LHS contextType here, so only the QUALIFIED ctor form (enum
+            // resolved via the type registry) supplies payload context; bare
+            // `.V(...)` falls through (no context) per §14.10 line 7174.
+            inferBareVariantsAtVariantCtorArgs(beExprNode, null, typeRegistry, beSpan, errors);
           }
         }
         // E-ERROR-002 (§19.4.3): a bare call to a failable function at top-level
@@ -9903,6 +9982,9 @@ function annotateNodes(
             // is fixed by the surrounding declaration" covers conditions
             // implicitly (the cell's type fixes the variant context).
             inferBareVariantsAtComparisonSites(ifCondExpr, scopeChain, ifCondSpan, errors);
+            // ss16 C4 (§45) — `==`/`!=` against a payload-variant ctor in a
+            // condition (`if (@phase == Phase.Serving)`).
+            checkEqPayloadVariantOperands(ifCondExpr, typeRegistry, ifCondSpan, errors);
             // Bare variants that are NOT at a comparison position inside
             // the condition (e.g. call-arg positions) are resolved by the
             // call-arg inference walker below — the if/while case does
@@ -9912,6 +9994,10 @@ function annotateNodes(
             // `_bareVariantInferredAtBinaryExpr` on resolved idents so the
             // downstream walkers can deduplicate.
             inferBareVariantsAtCallArgs(ifCondExpr, fnSignatures, ifCondSpan, errors);
+            // ss16 C5 (§14.10 position-3) — qualified enum-payload-variant
+            // CTOR arg inside an if/while condition (`if (@p == Mode.OnePlayer(.Easy))`).
+            // No LHS contextType; qualified ctor resolves via the type registry.
+            inferBareVariantsAtVariantCtorArgs(ifCondExpr, null, typeRegistry, ifCondSpan, errors);
           }
         }
         // §S19 — run `is` / `not`-prefix checks on the RAW condition string
@@ -10179,6 +10265,9 @@ function annotateNodes(
           // `.V`, or `.V` not in the cell's enum) still errors inside the
           // helper (E-VARIANT-AMBIGUOUS / E-TYPE-063).
           inferBareVariantsAtComparisonSites(retExprNode, scopeChain, retSpan, errors);
+          // ss16 C4 (§45) — `==`/`!=` against a payload-variant ctor in a
+          // return value (`return @phase == Phase.Serving`).
+          checkEqPayloadVariantOperands(retExprNode, typeRegistry, retSpan, errors);
           // S84 v0.2.4 #5-followon (Gap B.3) — bare-variant inference at
           // return-stmt value. Read the enclosing function's return type
           // from the stack pushed at function-decl entry; when present
@@ -10191,6 +10280,12 @@ function annotateNodes(
           const retCtx = enclosingFnReturnTypeStack.length > 0
             ? enclosingFnReturnTypeStack[enclosingFnReturnTypeStack.length - 1]
             : null;
+          // ss16 C5 (§14.10 position-3) — enum-payload-variant CTOR arg in a
+          // return value (`return .OnePlayer(.Easy)` where retCtx fixes the
+          // outer enum, or the qualified `Mode.OnePlayer(.Easy)`). Runs BEFORE
+          // the flat return-type walker so the stamp it sets makes that walker
+          // (which carries retCtx) skip the ctor arg.
+          inferBareVariantsAtVariantCtorArgs(retExprNode, retCtx, typeRegistry, retSpan, errors);
           if (retCtx) {
             inferBareVariantsInExpr(retExprNode, retCtx, retSpan, errors);
           }
@@ -11632,9 +11727,12 @@ function checkIsExpressions(
 // assignments) cases — the LHS-driven inference positions per §14.10's
 // six positions list. Engine `initial=` (position 6) is handled by B15
 // (symbol-table.ts:4247-4267); match `for=` arm patterns (position 5) are
-// handled by exhaustiveness today; positions 3 (param) and 4 (return)
-// require deeper FunctionType.params + return-type infra and are deferred
-// to a follow-up step (B20.b).
+// handled by exhaustiveness today; position 3 (fn param) is handled by
+// `inferBareVariantsAtCallArgs` (Gap B.4) for function-decl callees and by
+// `inferBareVariantsAtVariantCtorArgs` (ss16 C5) for enum-payload-variant
+// CONSTRUCTOR callees (`.OnePlayer(.Easy)` — the arg types from
+// VariantDef.payload); position 4 (return) is handled by the return-stmt
+// `inferBareVariantsInExpr(retExprNode, retCtx, ...)` wiring (Gap B.3).
 //
 // Per BRIEF §"OUT OF SCOPE": §18.0.3 match-arm pattern bare-variants are
 // left for a future step. The §34 catalog cross-ref currently cites
@@ -12841,6 +12939,150 @@ function inferBareVariantsAtComparisonSites(
 }
 
 /**
+ * ss16 C4 (§45) — `==`/`!=` against a PAYLOAD-variant CONSTRUCTOR lint.
+ *
+ * `@phase == Phase.Serving` where `Phase:enum = { Idle, Serving(angle: int) }`
+ * references the `Serving` CONSTRUCTOR (a function, not a value). `==` then
+ * lowers to `_scrml_structural_eq(@phase, Phase.Serving)` (§45.4 — correct, the
+ * emitter does NOT change), comparing the cell value against the ctor function
+ * → ALWAYS FALSE, silently. The author almost certainly meant `@phase is
+ * .Serving` (variant-tag check) or a `match`. UNIT variants compare fine (they
+ * lower to a string tag), so this fires ONLY for PAYLOAD-bearing variants.
+ *
+ * Sibling to `inferBareVariantsAtComparisonSites` (which handles `@cell == .V`).
+ * This walker detects the `@cell == Enum.Variant` / `Enum::Variant` shape where
+ * the member operand resolves to a PAYLOAD-carrying `VariantDef`. Fires the
+ * warning-level lint `W-EQ-PAYLOAD-VARIANT` (non-fatal — the always-false
+ * branch is a likely bug but does not block compilation; routes to
+ * `result.warnings` per the diagnostic-stream partition: W- prefix +
+ * severity:warning).
+ *
+ * Spec authority:
+ *   §45.5 — `==` vs `is` (the steer target).
+ *   §45.7 — error-code catalog row (W-EQ-PAYLOAD-VARIANT).
+ *   §45.8 — normative statement.
+ *   §34   — global catalog row.
+ */
+function checkEqPayloadVariantOperands(
+  exprNode: unknown,
+  typeRegistry: Map<string, ResolvedType>,
+  span: Span,
+  errors: TSError[],
+): void {
+  if (!exprNode || typeof exprNode !== "object") return;
+
+  /**
+   * If `node` is a member `Enum.Variant` / `Enum::Variant` whose object
+   * resolves to a registered enum AND whose property is a PAYLOAD-bearing
+   * variant, return `{ enumName, variantName }`. Returns null otherwise —
+   * unit variants (payload === null), unknown enums, and non-member operands
+   * all fall through (no lint).
+   */
+  const payloadCtorOperand = (node: unknown): { enumName: string; variantName: string } | null => {
+    if (!node || typeof node !== "object") return null;
+    const n = node as { kind?: string; object?: unknown; property?: unknown };
+    if (n.kind !== "member" || typeof n.property !== "string") return null;
+    const obj = n.object as { kind?: string; name?: string } | undefined;
+    if (!obj || obj.kind !== "ident" || typeof obj.name !== "string") return null;
+    const enumName = obj.name;
+    if (!/^[A-Z][A-Za-z0-9_]*$/.test(enumName)) return null;
+    const resolved = resolveTypeExpr(enumName, typeRegistry);
+    if (!resolved || resolved.kind !== "enum") return null;
+    const variantName = n.property as string;
+    const variant = ((resolved as EnumType).variants ?? []).find((v) => v.name === variantName);
+    // Only PAYLOAD-bearing variants are constructors (functions). Unit variants
+    // are string tags and compare fine — no lint. A non-existent variant
+    // (`Phase.Bogus`) is left to the existing member-resolution path.
+    if (!variant || !variant.payload || variant.payload.size === 0) return null;
+    return { enumName, variantName };
+  };
+
+  const fired = new WeakSet<object>();
+
+  const walk = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    const n = node as { kind?: string } & Record<string, unknown>;
+
+    if (n.kind === "binary" && (n.op === "==" || n.op === "!=")) {
+      for (const side of [n.left, n.right]) {
+        const hit = payloadCtorOperand(side);
+        if (hit && side && typeof side === "object" && !fired.has(side as object)) {
+          fired.add(side as object);
+          errors.push(new TSError(
+            "W-EQ-PAYLOAD-VARIANT",
+            `W-EQ-PAYLOAD-VARIANT: \`${n.op}\` compares against \`${hit.enumName}.${hit.variantName}\`, ` +
+            `which is a payload-variant CONSTRUCTOR (a function), not a value. This comparison is ` +
+            `ALWAYS ${n.op === "==" ? "false" : "true"}. To check whether a value is this variant, ` +
+            `use \`is .${hit.variantName}\` (§45.5) or a \`match\` (§18). To compare two ` +
+            `\`${hit.enumName}\` values, construct the variant with its payload ` +
+            `(\`${hit.enumName}.${hit.variantName}(...)\`).`,
+            span,
+            "warning",
+          ));
+        }
+      }
+    }
+
+    // Recurse into every child branch so nested comparisons are all visited.
+    if (n.kind === "binary" || n.kind === "assign") {
+      walk((n as Record<string, unknown>).left);
+      walk((n as Record<string, unknown>).right);
+      walk((n as Record<string, unknown>).target);
+      walk((n as Record<string, unknown>).value);
+      return;
+    }
+    if (n.kind === "ternary") {
+      walk((n as Record<string, unknown>).condition);
+      walk((n as Record<string, unknown>).consequent);
+      walk((n as Record<string, unknown>).alternate);
+      return;
+    }
+    if (n.kind === "unary") {
+      walk((n as Record<string, unknown>).argument);
+      return;
+    }
+    if (n.kind === "member") {
+      walk((n as Record<string, unknown>).object);
+      return;
+    }
+    if (n.kind === "index") {
+      walk((n as Record<string, unknown>).object);
+      walk((n as Record<string, unknown>).index);
+      return;
+    }
+    if (n.kind === "call") {
+      walk((n as Record<string, unknown>).callee);
+      const callArgs = (n as Record<string, unknown>).args;
+      if (Array.isArray(callArgs)) for (const a of callArgs) walk(a);
+      return;
+    }
+    if (n.kind === "array") {
+      const elements = (n as Record<string, unknown>).elements;
+      if (Array.isArray(elements)) for (const e of elements) walk(e);
+      return;
+    }
+    if (n.kind === "object") {
+      const props = (n as Record<string, unknown>).props;
+      if (Array.isArray(props)) {
+        for (const p of props) {
+          if (p && typeof p === "object") {
+            walk((p as Record<string, unknown>).value);
+            walk((p as Record<string, unknown>).argument);
+          }
+        }
+      }
+      return;
+    }
+    if (n.kind === "paren") {
+      walk((n as Record<string, unknown>).expr);
+      return;
+    }
+  };
+
+  walk(exprNode);
+}
+
+/**
  * S84 v0.2.4 #5-followon (Gap B.4) — bare-variant inference at function
  * call-arg positions.
  *
@@ -12963,6 +13205,203 @@ function inferBareVariantsAtCallArgs(
       walk((n as Record<string, unknown>).callee);
       const args = (n as Record<string, unknown>).args;
       if (Array.isArray(args)) for (const a of args) walk(a);
+      return;
+    }
+    if (n.kind === "array") {
+      const elements = (n as Record<string, unknown>).elements;
+      if (Array.isArray(elements)) for (const e of elements) walk(e);
+      return;
+    }
+    if (n.kind === "object") {
+      const props = (n as Record<string, unknown>).props;
+      if (Array.isArray(props)) {
+        for (const p of props) {
+          if (p && typeof p === "object") {
+            walk((p as Record<string, unknown>).value);
+            walk((p as Record<string, unknown>).argument);
+          }
+        }
+      }
+      return;
+    }
+    if (n.kind === "paren") {
+      walk((n as Record<string, unknown>).expr);
+      return;
+    }
+  };
+
+  walk(exprNode);
+}
+
+/**
+ * ss16 C5 (§14.10 position-3 — enum-payload-variant CONSTRUCTOR arg) — bare-
+ * variant inference at variant-constructor call-arg positions.
+ *
+ * Sibling to `inferBareVariantsAtCallArgs` (function-decl callees, looked up
+ * via `fnSignatures`). A variant-constructor callee (`.OnePlayer(...)` /
+ * `Mode.OnePlayer(...)` / `Mode::OnePlayer(...)`) is NOT a function-decl, so it
+ * is NOT in `fnSignatures` → the fn-call walker silently falls through and the
+ * flat LHS-driven walker then mis-resolves the ctor ARG (`.Easy`) against the
+ * OUTER enum (`Mode`) instead of the payload-field type (`Difficulty`) —
+ * spurious E-TYPE-063. This walker recognizes the ctor callee, sources the
+ * positional param types from `VariantDef.payload` (declared insertion order,
+ * §42.x), and dispatches each arg to the flat walker with the RIGHT payload
+ * context. Resolved bare-variant arg idents get `_bareVariantInferredAtBinaryExpr`
+ * stamped (sharing the Bug 5 flag) so the LHS-driven flat walker skips them.
+ *
+ * Callee recognition:
+ *   - bare `.Variant`  → `{ kind:"ident", name:".OnePlayer" }`; the enclosing
+ *     enum is supplied by `contextType` (the LHS-driven type — enum or union).
+ *   - qualified `Enum.Variant` / `Enum::Variant` → both parse to
+ *     `{ kind:"member", object:{ ident "Enum" }, property:"Variant" }`; the enum
+ *     is resolved from `typeRegistry`.
+ *
+ * Only PAYLOAD-bearing variants (`VariantDef.payload != null`) take args; a
+ * unit-variant "call" (`.TwoPlayer()`) is left to the fn-call / flat path. A
+ * bare-variant callee whose contextType is non-enum/non-union, or a qualified
+ * callee whose name isn't a registered enum, falls through silently (the flat
+ * walker handles those positions per existing behavior).
+ *
+ * Spec authority:
+ *   §14.10 — "any other position where the type is fixed by the surrounding
+ *            declaration" (the ctor-param position is position-3). The code
+ *            comment at ~11635 previously deferred positions 3/4; C5 covers 3.
+ *   §34    — E-TYPE-063 (typo arg) / E-VARIANT-AMBIGUOUS (no payload context).
+ */
+function inferBareVariantsAtVariantCtorArgs(
+  exprNode: unknown,
+  contextType: ResolvedType | null,
+  typeRegistry: Map<string, ResolvedType>,
+  span: Span,
+  errors: TSError[],
+): void {
+  if (!exprNode || typeof exprNode !== "object") return;
+
+  /**
+   * Pick the enum from a contextType that declares `variantName`:
+   *   - enum   → that enum (regardless of whether it declares the variant; the
+   *     downstream `.find` returns null on a typo, and the flat walker then
+   *     handles the arg with no payload context — preserving E-TYPE-063 on the
+   *     ARG against the right payload type).
+   *   - union  → the unique enum member declaring the variant; null if zero or
+   *     ambiguous (left to the existing union diagnostics).
+   * Returns null for any other contextType.
+   */
+  const enumFromContext = (ct: ResolvedType | null, variantName: string): EnumType | null => {
+    if (!ct) return null;
+    if (ct.kind === "enum") return ct as EnumType;
+    if (ct.kind === "union") {
+      const declarers = (ct as UnionType).members.filter(
+        (m): m is EnumType => m.kind === "enum" && (m.variants ?? []).some((v) => v.name === variantName),
+      );
+      return declarers.length === 1 ? declarers[0] : null;
+    }
+    return null;
+  };
+
+  /**
+   * Resolve a constructor callee node to the declaring `VariantDef`, or null.
+   *   - bare `.Variant` ident → look the variant up in `contextType`
+   *     (enum directly, or the unique enum member of a union).
+   *   - qualified `Enum.Variant` member → resolve `Enum` in `typeRegistry`,
+   *     then find the variant.
+   * Returns null for any shape that is not a variant constructor (so the
+   * caller falls through to the existing fn-call / flat walkers).
+   */
+  const resolveCtorVariant = (callee: unknown): VariantDef | null => {
+    if (!callee || typeof callee !== "object") return null;
+    const c = callee as { kind?: string; name?: string; object?: unknown; property?: unknown };
+
+    // Bare `.Variant` ident callee — enum supplied by contextType.
+    if (c.kind === "ident" && typeof c.name === "string" && c.name.length >= 2 && c.name[0] === ".") {
+      const variantName = c.name.slice(1);
+      if (!/^[A-Z][A-Za-z0-9_]*$/.test(variantName)) return null;
+      const enumType = enumFromContext(contextType, variantName);
+      if (!enumType) return null;
+      return (enumType.variants ?? []).find((v) => v.name === variantName) ?? null;
+    }
+
+    // Qualified `Enum.Variant` / `Enum::Variant` member callee.
+    if (c.kind === "member" && typeof c.property === "string") {
+      const obj = c.object as { kind?: string; name?: string } | undefined;
+      if (!obj || obj.kind !== "ident" || typeof obj.name !== "string") return null;
+      const enumName = obj.name;
+      if (!/^[A-Z][A-Za-z0-9_]*$/.test(enumName)) return null;
+      const resolved = resolveTypeExpr(enumName, typeRegistry);
+      if (!resolved || resolved.kind !== "enum") return null;
+      const variantName = c.property as string;
+      return ((resolved as EnumType).variants ?? []).find((v) => v.name === variantName) ?? null;
+    }
+
+    return null;
+  };
+
+  const walk = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    const n = node as { kind?: string } & Record<string, unknown>;
+
+    if (n.kind === "call") {
+      const args = Array.isArray(n.args) ? (n.args as unknown[]) : [];
+      const variant = resolveCtorVariant(n.callee);
+      // Only payload-bearing variants take positional args. A unit-variant
+      // callee (payload === null) or an unresolved callee falls through.
+      if (variant && variant.payload && variant.payload.size > 0) {
+        const payloadTypes = Array.from(variant.payload.values()); // declared order
+        for (let i = 0; i < args.length; i++) {
+          const arg = args[i];
+          const paramType = payloadTypes[i];
+          if (!paramType) continue; // over-supplied — arity is checked elsewhere.
+          // Dispatch the flat walker with the PAYLOAD-field type, not the
+          // outer enum. Bare `.Easy` resolves against `Difficulty`; a true
+          // typo `.Nope` fires E-TYPE-063 against `Difficulty`.
+          inferBareVariantsInExpr(arg, paramType, span, errors);
+          // Stamp the arg ident so the LHS-driven flat walker (which runs over
+          // the WHOLE init with the outer enum context) skips it — preventing
+          // the spurious E-TYPE-063 against `Mode`.
+          if (arg && typeof arg === "object") {
+            const a = arg as { kind?: string; name?: string };
+            if (a.kind === "ident" && typeof a.name === "string" && a.name.startsWith(".")) {
+              Object.defineProperty(arg, "_bareVariantInferredAtBinaryExpr", {
+                value: true, enumerable: false, configurable: true, writable: true,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    // Recurse into every child branch — nested ctors (`.A(.B(.C))`), ctors
+    // inside calls / ternaries / arrays / objects, etc.
+    if (n.kind === "binary" || n.kind === "assign") {
+      walk((n as Record<string, unknown>).left);
+      walk((n as Record<string, unknown>).right);
+      walk((n as Record<string, unknown>).target);
+      walk((n as Record<string, unknown>).value);
+      return;
+    }
+    if (n.kind === "ternary") {
+      walk((n as Record<string, unknown>).condition);
+      walk((n as Record<string, unknown>).consequent);
+      walk((n as Record<string, unknown>).alternate);
+      return;
+    }
+    if (n.kind === "unary") {
+      walk((n as Record<string, unknown>).argument);
+      return;
+    }
+    if (n.kind === "member") {
+      walk((n as Record<string, unknown>).object);
+      return;
+    }
+    if (n.kind === "index") {
+      walk((n as Record<string, unknown>).object);
+      walk((n as Record<string, unknown>).index);
+      return;
+    }
+    if (n.kind === "call") {
+      walk((n as Record<string, unknown>).callee);
+      const callArgs = (n as Record<string, unknown>).args;
+      if (Array.isArray(callArgs)) for (const a of callArgs) walk(a);
       return;
     }
     if (n.kind === "array") {
@@ -18461,6 +18900,10 @@ function processFile(
     // §20.6.7 / W-LOG-SHADOWED — a user-declared `function log` / `fn log`
     // shadows the location-transparent log() builtin; info-level nudge.
     checkLogShadowing(fnFieldTopNodes, errors, fileSpan);
+    // ss16 C3 / W-RENDER-SHADOWED — a user-declared `function render` / `fn
+    // render` shadows the render() client component-render builtin; info-level
+    // nudge (mirrors W-LOG-SHADOWED).
+    checkRenderShadowing(fnFieldTopNodes, errors, fileSpan);
     // §14 / E-TYPE-ANY-FORBIDDEN — `any` is not a type in scrml (S174 hard
     // line). Reject the literal type-token `any` in every type-annotation
     // position; `asIs` is the sanctioned untyped escape hatch.

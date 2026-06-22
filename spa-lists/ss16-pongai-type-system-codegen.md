@@ -31,5 +31,13 @@ type-system variant-typing path scopes all three.
 ## Disposition
 *(filled by the sPA during the run — per-item: landed-on-branch SHA / parked + reason / NOT-REPRODUCED / dropped.)*
 
+All three **R26-REPRODUCED** on `1ce8de34`, fixed by agent `a58f1b208605f9779`, **R26-VERIFIED** by the sPA (independent recompile), and **landed-on-branch `spa/ss16`** as one file-delta commit. See `ss16.progress.md` for the verify detail.
+
+- **[1] pongai-c5-ctor-arg-contextual-typing** — `landed-on-branch` · agent commit `75bcf670` · `inferBareVariantsAtVariantCtorArgs` (§14.10 pos-3). Verified: `.OnePlayer(.Easy)` clean, typo errors vs `Difficulty`.
+- **[2] pongai-c4-eq-vs-payload-variant-ctor** — `landed-on-branch` · agent commit `0cf70072` · `W-EQ-PAYLOAD-VARIANT` lint (§45.7/§45.8/§34). Verified: fires on payload-ctor `==`, no false-positive on unit-variant / `is`.
+- **[3] pongai-c3-render-builtin-shadowing** — `landed-on-branch` · agent commit `3f6fa0c8` · render-shadowing mirror of `log` (§20.3a/§34). Verified: def/call both `_scrml_render_1()`, `node --check` clean, `W-RENDER-SHADOWED` fires.
+
+**2 residuals surfaced to PA (out-of-scope):** (a) bare `render()` w/o user `function render` fires `E-SCOPE-001` in the typer (call-form builtin not a typer global; codegen lowers it fine) — pre-existing diagnostic gap, orthogonal to C3. (b) C4 lint homed in type-system.ts; sibling map-key equality checks live in `gauntlet-phase3-eq-checks.js` — consolidation candidate if PA wants it.
+
 ## Progress
 `ss16.progress.md`. Land on `spa/ss16`; ping the PA inbox (`scrml/handOffs/incoming/`) when a batch is ready. Do not advance main / do not push.
