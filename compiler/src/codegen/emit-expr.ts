@@ -294,6 +294,20 @@ export interface EmitExprContext {
    * `<request>` in scope (all `<#id>` refs lower to the §36 input-state registry).
    */
   requestIds?: Set<string> | null;
+  /**
+   * Issue #1 (parent scrmlTS) — names of SIBLING server functions that are
+   * callable in-process within a server-mode body. When `mode === "server"`
+   * and a plain-ident call targets a name in this set (and it is not shadowed
+   * by a local in `declaredNames`), `emitCall` lowers the call to
+   * `await <name>(...)` so it resolves to the peer callable emitted by
+   * `emit-server.ts` (`async function <name>(<params>) { ... }`) and the
+   * peer's async result is awaited. NULL/empty → no server-fn composition in
+   * scope (calls lower to a bare invocation, the pre-fix behavior). Threaded
+   * from `EmitLogicOpts.serverFnNames` via `_makeExprCtx`. The CLIENT calls a
+   * server fn through the emit-functions.ts fetch stub instead, so this never
+   * fires for `mode === "client"`.
+   */
+  serverFnNames?: Set<string> | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -1805,6 +1819,27 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
     return args.length > 0
       ? `_scrml_log(${tagArgs}, ${args})`
       : `_scrml_log(${tagArgs})`;
+  }
+
+  // Issue #1 (parent scrmlTS) — server-fn → sibling server-fn in-process call.
+  // The per-fn route handler (`_scrml_handler_*`) is a Request->Response wrapper,
+  // NOT a plain callable, so a body-level `nextOrder()` reference had no binding
+  // ("nextOrder is not defined" at runtime). emit-server.ts now emits a plain
+  // `async function <name>(<params>) { ... }` peer callable for each composed
+  // server fn and registers the name in `ctx.serverFnNames`; here we resolve the
+  // call to that peer and `await` it (the peer is async — without the await the
+  // body would leak an unawaited Promise into downstream SQL/params). Only fires
+  // in server-mode emission; a local of the same name shadows the peer.
+  if (
+    ctx.mode === "server" &&
+    !node.optional &&
+    node.callee.kind === "ident" &&
+    typeof node.callee.name === "string" &&
+    ctx.serverFnNames != null &&
+    ctx.serverFnNames.has(node.callee.name) &&
+    !(ctx.declaredNames != null && ctx.declaredNames.has(node.callee.name))
+  ) {
+    return `await ${callee}(${args})`;
   }
 
   const call = node.optional ? "?.(" : "(";
