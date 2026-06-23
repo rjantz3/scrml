@@ -6,7 +6,7 @@ import { emitLogicNode, emitFnShortcutBody } from "./emit-logic.ts";
 import { getNodes } from "./collect.ts";
 import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, collectChannelFunctionMap, collectChannelCellMap, filterChannelImportSpecifiers } from "./emit-channel.ts";
 import { serverRewriteEmitted, setVariantFieldsForRewriter } from "./rewrite.js";
-import { buildVariantFieldsRegistry } from "./emit-client.js";
+import { buildVariantFieldsRegistry, emitEnumVariantObjects } from "./emit-client.js";
 import { emitExpr, emitExprField, type EmitExprContext } from "./emit-expr.ts";
 import type { CompileContext } from "./context.ts";
 import { emitServerParamCheck, parsePredicateAnnotation } from "./emit-predicates.ts";
@@ -36,6 +36,57 @@ function localServerImportNameUsed(body: string, name: string): boolean {
   // `otherName` / `name2` / `_name`.
   const re = new RegExp("(^|[^A-Za-z0-9_$])" + name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "([^A-Za-z0-9_$]|$)");
   return re.test(body);
+}
+
+// Bug-51 collision guard (E-CG-016, §47): is `name` ALREADY declared at the
+// TOP LEVEL of the assembled server body? Used before injecting a
+// compiler-generated `const <Enum> = Object.freeze(...)` enum object to detect
+// a clash with an existing top-level binding — most notably the
+// compiler-injected `import { SQL } from "bun"` runtime handle, when an author
+// names a page-local enum `SQL` (or any name that collides with another
+// top-level decl). Without this check the bundle would carry two declarations
+// of the same identifier and fail the emit-validation gate with a cryptic
+// `Identifier '<X>' has already been declared` SyntaxError on otherwise-valid
+// scrml. The scan is line-oriented over top-level decl/import forms:
+//   const/let/var <name>      function/function* <name>      class <name>
+//   import { ... <name> ... } / import { ... <name> as <x> }  (named specifier)
+//   import <name> from ...     (default)
+//   import * as <name> from ...(namespace)
+// It is intentionally conservative — a top-level decl is one that begins a line
+// (modulo leading whitespace); nested/block-scoped decls do not collide with a
+// module-scope `const`, so a line-anchored scan is the correct altitude.
+function topLevelBindingExists(body: string, name: string): boolean {
+  if (!name) return false;
+  const n = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // const/let/var/function/function*/class <name> at start-of-line.
+  const declRe = new RegExp(
+    "^\\s*(?:export\\s+)?(?:const|let|var|function\\*?|class)\\s+" + n + "\\b",
+    "m",
+  );
+  if (declRe.test(body)) return true;
+  // import <name> from ...  /  import * as <name> from ...
+  const importDefaultRe = new RegExp(
+    "^\\s*import\\s+(?:\\*\\s+as\\s+)?" + n + "\\b",
+    "m",
+  );
+  if (importDefaultRe.test(body)) return true;
+  // import { ... <name> ... } / import { ... x as <name> ... } — the LOCAL
+  // binding is `<name>` either standalone or after `as`. Scan each import line
+  // with a `{ ... }` clause for a named-specifier local matching `<name>`.
+  const namedImportLineRe = /^\s*import\s*\{([^}]*)\}\s*from\b/gm;
+  let m: RegExpExecArray | null;
+  while ((m = namedImportLineRe.exec(body)) !== null) {
+    const specs = m[1].split(",");
+    for (const raw of specs) {
+      const spec = raw.trim();
+      if (spec.length === 0) continue;
+      // local name is the part after `as`, else the whole specifier.
+      const asIdx = spec.search(/\bas\b/);
+      const local = (asIdx === -1 ? spec : spec.slice(asIdx + 2)).trim();
+      if (local === name) return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -2299,6 +2350,97 @@ export function generateServerJs(
       // Fallback if the sentinel was the final line (no trailing newline).
       .split(LOCAL_SERVER_IMPORT_SENTINEL)
       .join(replacement);
+  }
+
+  // Bug-51 (§14.4): page-local enum-variant objects in the SERVER bundle.
+  // A page-local `type X:enum` referenced inside a `server function` body
+  // (e.g. `return ok ? Load.Ok : Load.Bad`) lowers to a member-access on a
+  // frozen `const X = Object.freeze({...})`. `rewriteEnumVariantAccess`
+  // (rewrite.ts) deliberately leaves `X.Member` AS-IS (only bare `.Member` /
+  // `X::Member` are string-inlined), so the runtime needs the `const X` to
+  // exist. `emitEnumVariantObjects` only emitted these into the CLIENT bundle;
+  // server-fn bodies referenced `X.Member` as a free identifier → runtime
+  // `ReferenceError: X is not defined`. Reuse the SAME emitter as the client
+  // (byte-identical `Object.freeze` shape, so server↔client serialization of a
+  // payload variant agrees), gated on reachability: emit only an enum whose
+  // name is actually referenced in the assembled server body. This mirrors the
+  // DB-scope-const reachability scan above (`usedIdents`) and keeps the server
+  // bundle minimal (an enum string-inlined as `.Member` / used only in client
+  // markup never appears here).
+  //
+  // ORDERING (Bug-51 follow-up): this block runs AFTER the server-import
+  // tree-shaking prune pass above. The prune scans `finalEmitted` to decide
+  // which deferred local-`.scrml` server imports survive; if an injected
+  // `const <Enum> = Object.freeze` landed BEFORE the prune, an enum whose name
+  // happened to match a client-only server-import local would spuriously count
+  // as a "reference" and keep an otherwise-dead import (a dangling
+  // `.server.js`). Injecting the enum consts after the prune keeps the prune's
+  // reference scan honest. The reachability gate below scans the assembled
+  // route-handler body (present before the prune either way), so it is
+  // unaffected by the reordering; the consts still hoist above the route
+  // handlers (header `\n\n` injection point).
+  const enumDefLines = emitEnumVariantObjects(fileAST);
+  if (enumDefLines.length > 0) {
+    // name → declaration span, for a precise E-CG-016 collision diagnostic.
+    const enumDeclSpans = new Map<string, any>();
+    for (const decl of (fileAST.typeDecls ?? fileAST.ast?.typeDecls ?? [])) {
+      if (decl && decl.kind === "type-decl" && decl.typeKind === "enum" && decl.name) {
+        enumDeclSpans.set(decl.name, decl.span ?? {});
+      }
+    }
+    const referencedEnumLines: string[] = [];
+    for (const line of enumDefLines) {
+      // Each line is `const <Name> = Object.freeze({ ... });` — extract the
+      // declared enum name and keep the def only if `<Name>` appears as a
+      // standalone identifier somewhere in the assembled body (a `<Name>.Member`
+      // member-access in a server-fn body, the only form needing the runtime
+      // const). `localServerImportNameUsed` is the same word-boundary check
+      // used for server-import tree-shaking.
+      const nameMatch = /^const\s+([A-Za-z_$][A-Za-z0-9_$]*)\s+=/.exec(line);
+      if (!nameMatch) continue;
+      const enumName = nameMatch[1];
+      if (!localServerImportNameUsed(finalEmitted, enumName)) continue;
+      // Collision guard (E-CG-016): the enum is referenced server-side, but its
+      // name is ALREADY bound at the top level of the assembled bundle — most
+      // commonly the compiler-injected `import { SQL } from "bun"` runtime
+      // handle clashing with an author `type SQL:enum`. Injecting a second
+      // `const <Enum>` here would yield two declarations of the same identifier
+      // and fail the emit-validation gate with a cryptic
+      // `Identifier '<X>' has already been declared` SyntaxError on otherwise-
+      // valid scrml. Skipping silently would instead trade that for a runtime
+      // `ReferenceError` on the enum's `.Member` refs (strictly worse), so we
+      // fail closed with a clear, adopter-actionable diagnostic naming the
+      // conflict and the fix (rename the enum).
+      if (topLevelBindingExists(finalEmitted, enumName)) {
+        errors.push(new CGError(
+          "E-CG-016",
+          `E-CG-016: page-local enum \`${enumName}\` collides with a compiler-injected ` +
+          `top-level server-bundle binding of the same name (e.g. the \`import { SQL } ` +
+          `from "bun"\` runtime handle, or a server-only import). The generated server ` +
+          `bundle cannot declare \`${enumName}\` twice. Resolution: rename the enum to a ` +
+          `name that does not clash with a compiler-reserved server binding ` +
+          `(e.g. \`SQL\` is reserved when the page uses a \`<db>\` / \`?{}\` query).`,
+          enumDeclSpans.get(enumName) ?? {},
+          "error",
+        ));
+        continue;
+      }
+      referencedEnumLines.push(line);
+    }
+    if (referencedEnumLines.length > 0) {
+      const enumBlock =
+        "\n// --- enum variant objects (compiler-generated, §14.4) ---\n" +
+        referencedEnumLines.join("\n") +
+        "\n";
+      // Inject after the header's first blank-line boundary so the frozen enum
+      // consts are hoisted above every route handler that references them.
+      const headerEndIdx = finalEmitted.indexOf("\n\n");
+      if (headerEndIdx === -1) {
+        finalEmitted = enumBlock + finalEmitted;
+      } else {
+        finalEmitted = finalEmitted.slice(0, headerEndIdx) + enumBlock + finalEmitted.slice(headerEndIdx);
+      }
+    }
   }
 
   return finalEmitted;
