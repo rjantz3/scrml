@@ -2245,6 +2245,22 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // `undefined` either way. The variable can still be (re)assigned later
       // (e.g. via a `server function` returning the SQL result through CPS).
       if (node.sqlNode && node.sqlNode.kind === "sql") {
+        // §52.6.5 Pattern C (S216): a `<var server> = ?{…}` decl IS a
+        // server-cell mount load. The actual hydration (the
+        // `/__serverLoad/<var>` fetch IIFE) is emitted by
+        // emit-reactive-wiring; here on the decl site we emit an accurate
+        // note instead of the (now-misleading) "client cannot evaluate" steer
+        // — the cell DOES load. A param-bearing query is the bounded follow-on
+        // (W-AUTH-004); a param-free query loads on mount.
+        if (node.isServer === true) {
+          const _q = typeof node.sqlNode.query === "string"
+            ? node.sqlNode.query
+            : (typeof node.sqlNode.body === "string" ? node.sqlNode.body : "");
+          if (_q.includes("${")) {
+            return _appendSidecar(`// <${node.name} server> = ?{…} — PARAM-BEARING inline ?{} (W-AUTH-004): param-passing not yet shipped; cell shows its placeholder until loaded (§52.6.5 Pattern C).`);
+          }
+          return _appendSidecar(`// <${node.name} server> = ?{…} — inline-?{} RHS load (§52.6.5 Pattern C); hydrated on mount via /__serverLoad/${node.name} (the query is server-only).`);
+        }
         return _appendSidecar(`// SQL-init for @${node.name} — client cannot evaluate _scrml_sql (E-CG-006); declare as \`server @${node.name}\` for mount-hydration (§8.11).`);
       }
       // Legacy fallthrough for non-SQL state-decl initializers.

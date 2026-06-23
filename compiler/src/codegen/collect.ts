@@ -624,3 +624,45 @@ export function callableServerVarDecls(decls: Node[]): Node[] {
     return !!initExpr && initExpr.includes("(");
   });
 }
+
+/**
+ * §52.6.5 Pattern C — inline-`?{}` RHS LOAD classification for a Tier-2
+ * `<var server>` declaration (S216 ruling, disposition A=LOAD).
+ *
+ * The ss1 item-3 parser leak-stop attaches a structured `sqlNode`
+ * (`{ kind:"sql", query, chainedCalls }`) to a `<var server> = ?{…}` decl
+ * (and the `server @var = ?{}` form). That `?{}` IS the cell's mount load:
+ * the compiler emits a `/__serverLoad/<var>` route that runs the query
+ * server-side and a client fetch that hydrates the cell on mount.
+ *
+ * Returns the load CLASS:
+ *   - "sql-load"      — the RHS is a PARAM-FREE inline `?{}` (the shipped core).
+ *                       The query has no `${}` interpolation, so the built
+ *                       `/__serverLoad/<var>` POST-empty-body path serves it.
+ *   - "param-bearing" — the RHS is an inline `?{}` whose query interpolates a
+ *                       client-local cell (`${@driverId}`). This needs POST-body
+ *                       param-passing on `/__serverLoad/<var>` — a bounded
+ *                       follow-on, OUT OF SCOPE for the param-free core. The
+ *                       caller emits a graceful diagnostic (W-AUTH-004) and NO
+ *                       load (the cell shows its placeholder).
+ *   - "none"          — no inline `?{}` on the RHS (a literal placeholder like
+ *                       `= 0` / `= []` / `= not`, or a Pattern-A/B load). Handled
+ *                       by the existing emitInitialLoad / §52.6.5 A/B paths.
+ *
+ * The `${@cell}` detection is on the RAW query text (the parser preserves the
+ * interpolation verbatim in `sqlNode.query`); a param-free query never contains
+ * the `${` token.
+ */
+export type ServerVarLoadKind = "sql-load" | "param-bearing" | "none";
+
+export function serverVarDeclLoadKind(decl: Node): ServerVarLoadKind {
+  const sqlNode = (decl as any).sqlNode;
+  if (!sqlNode || sqlNode.kind !== "sql") return "none";
+  const query: string = typeof sqlNode.query === "string"
+    ? sqlNode.query
+    : (typeof sqlNode.body === "string" ? sqlNode.body : "");
+  // A param-bearing SELECT interpolates a client-local cell — `${...}` in the
+  // raw query text. The POST-body param-passing path is a bounded follow-on.
+  if (query.includes("${")) return "param-bearing";
+  return "sql-load";
+}

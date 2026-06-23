@@ -1,7 +1,7 @@
 import { CGError } from "./errors.ts";
 import { genVar, getVarCounter, setVarCounter } from "./var-counter.ts";
 import { routePath, paramSignature } from "./utils.ts";
-import { collectFunctions, collectServerVarDecls, callableServerVarDecls, collectServerAuthorityTypes, isServerOnlyNode } from "./collect.ts";
+import { collectFunctions, collectServerVarDecls, callableServerVarDecls, collectServerAuthorityTypes, serverVarDeclLoadKind, isServerOnlyNode } from "./collect.ts";
 import { emitLogicNode, emitFnShortcutBody } from "./emit-logic.ts";
 import { getNodes } from "./collect.ts";
 import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, collectChannelFunctionMap, collectChannelCellMap, filterChannelImportSpecifiers } from "./emit-channel.ts";
@@ -946,6 +946,19 @@ export function generateServerJs(
   const _serverAuthorityInstances = collectServerAuthorityTypes(fileAST);
   const _hasServerAuthorityCells = _serverAuthorityInstances.length > 0;
 
+  // §52.6.5 Pattern C (S216 disposition A): Tier-2 `<var server> = ?{…}` decls
+  // whose inline `?{}` IS the mount load (param-FREE only — a param-bearing
+  // query needs POST-body params, a bounded follow-on). Each gets a synthetic
+  // `/__serverLoad/<var>` route running the cell's actual query. The emission
+  // gate must fire on them even when there are no developer-authored server fns
+  // (a Pattern-C-only file would otherwise early-return "" and the load route
+  // would have nowhere to live — mirror of the Tier-1 _hasServerAuthorityCells
+  // gate above).
+  const _patternCLoadDecls = _mhAllServerVars.filter(
+    (d) => serverVarDeclLoadKind(d) === "sql-load",
+  );
+  const _hasPatternCLoad = _patternCLoadDecls.length > 0;
+
   if (
     serverFns.length === 0 &&
     !authMiddlewareEntry &&
@@ -953,7 +966,8 @@ export function generateServerJs(
     !middlewareConfig &&
     !_scrml_handleNodeEarly &&
     !_needsMountHydrate &&
-    !_hasServerAuthorityCells
+    !_hasServerAuthorityCells &&
+    !_hasPatternCLoad
   ) return "";
 
   const lines: string[] = [];
@@ -2056,6 +2070,45 @@ export function generateServerJs(
     lines.push(`async function ${slHandler}(_scrml_req) {`);
     lines.push(`  const _scrml_rows = await _scrml_sql\`SELECT * FROM ${table}\`;`);
     lines.push(`  return new Response(JSON.stringify(_scrml_rows), {`);
+    lines.push(`    status: 200,`);
+    lines.push(`    headers: { "Content-Type": "application/json" },`);
+    lines.push(`  });`);
+    lines.push(`}`);
+    lines.push("");
+    lines.push(`export const ${slRoute} = {`);
+    lines.push(`  path: "/__serverLoad/${varName}",`);
+    lines.push(`  method: "POST",`);
+    lines.push(`  handler: ${slHandler},`);
+    lines.push(`};`);
+    lines.push("");
+  }
+
+  // §52.6.5 Pattern C (S216 disposition A) — synthetic /__serverLoad/<var>
+  // route per Tier-2 `<var server> = ?{…}` decl whose inline `?{}` IS the mount
+  // load. Unlike the Tier-1 path above (a FIXED `SELECT * FROM <table>`), this
+  // runs the cell's ACTUAL `?{}` query server-side, lowered through the
+  // canonical §44 SQL emitter (emitLogicNode case "sql" — same path a `?{}`
+  // inside a server fn body takes), so the `.get()`/`.all()` terminator and any
+  // bound params are handled identically. Param-free only (the filter already
+  // excludes param-bearing forms); the query never leaks to the client (the
+  // route is SERVER-only, and the client fetch POSTs an empty body).
+  for (const decl of _patternCLoadDecls) {
+    const varName = decl.name as string;
+    const sqlNode = (decl as any).sqlNode;
+    const slHandler = `_scrml_serverLoad_${varName}_handler`;
+    const slRoute = `_scrml_route___serverLoad_${varName}`;
+    // Lower the cell's `?{}` to its server-side form (e.g.
+    // `(await _scrml_sql`SELECT …`)[0] ?? null;` for `.get()`).
+    const sqlExpr = (serverRewriteEmitted(
+      emitLogicNode(sqlNode, { boundary: "server" }),
+    ) ?? "").replace(/;\s*$/, "");
+    lines.push(`// --- §52.6.5 Pattern C server-cell load route for < ${varName} > (inline ?{}) ---`);
+    lines.push(`async function ${slHandler}(_scrml_req) {`);
+    // sqlExpr already begins with `await` (the §44 lowering emits
+    // `(await _scrml_sql`…`)[0] ?? null` for `.get()`, `await _scrml_sql`…`` for
+    // `.all()`); do NOT double-await.
+    lines.push(`  const _scrml_result = ${sqlExpr};`);
+    lines.push(`  return new Response(JSON.stringify(_scrml_result), {`);
     lines.push(`    status: 200,`);
     lines.push(`    headers: { "Content-Type": "application/json" },`);
     lines.push(`  });`);

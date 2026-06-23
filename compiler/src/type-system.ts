@@ -9317,7 +9317,41 @@ function annotateNodes(
             const _isTier1AuthInstance =
               typeof (n as ASTNodeLike).serverAuthorityTable === "string" &&
               ((n as ASTNodeLike).serverAuthorityTable as string).length > 0;
-            if (!hasInitCall && !_isTier1AuthInstance) {
+            // §52.6.5 Pattern C (S216 disposition A): a `<var server> = ?{…}`
+            // decl carries a structured `sqlNode` (ss1 item-3 leak-stop) — the
+            // inline `?{}` IS the cell's mount load. The classification mirrors
+            // codegen's `serverVarDeclLoadKind`:
+            //   - PARAM-FREE  → the compiler emits a `/__serverLoad/<var>` route
+            //     + client fetch-on-mount; W-AUTH-001 does NOT apply (it loads).
+            //   - PARAM-BEARING (`?{ … ${@cell} … }`) → needs POST-body param-
+            //     passing (a bounded follow-on, not yet shipped); the cell will
+            //     NOT hydrate. Replace the generic W-AUTH-001 with the precise
+            //     W-AUTH-004 steer (param-free query, or `on mount`).
+            const _sqlNode = (n as ASTNodeLike).sqlNode as
+              | { kind?: string; query?: string; body?: string }
+              | undefined;
+            const _hasInlineSql = !!_sqlNode && _sqlNode.kind === "sql";
+            const _inlineSqlQuery = _hasInlineSql
+              ? (typeof _sqlNode!.query === "string"
+                  ? _sqlNode!.query
+                  : (typeof _sqlNode!.body === "string" ? _sqlNode!.body : ""))
+              : "";
+            const _isPatternCParamFree = _hasInlineSql && !_inlineSqlQuery.includes("${");
+            const _isPatternCParamBearing = _hasInlineSql && _inlineSqlQuery.includes("${");
+
+            if (_isPatternCParamBearing) {
+              errors.push(new TSError(
+                "W-AUTH-004",
+                `W-AUTH-004: 'server @${n.name as string}' has a PARAM-BEARING inline ?{} ` +
+                `on its declaration RHS (the query interpolates a client-local cell). ` +
+                `Param-bearing server-cell load is not yet supported — the cell will NOT ` +
+                `hydrate on mount. Use a PARAM-FREE query (no \${...} in the SELECT), or ` +
+                `supply the load in an 'on mount' block (§52.6.5 Pattern B): ` +
+                `on mount { @${n.name as string} = ?{ ... }.get() }.`,
+                declSpan,
+                "warning",
+              ));
+            } else if (!hasInitCall && !_isTier1AuthInstance && !_isPatternCParamFree) {
               errors.push(new TSError(
                 "W-AUTH-001",
                 `W-AUTH-001: 'server @${n.name as string}' has no detected initial load. ` +

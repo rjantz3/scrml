@@ -118,6 +118,54 @@ export function emitServerAuthorityLoad(varName: string, table: string): string[
 }
 
 // ---------------------------------------------------------------------------
+// §52.6.5 Pattern C — inline-`?{}` RHS decl LOAD (S216 disposition A)
+// ---------------------------------------------------------------------------
+
+/**
+ * Emit the client-side initial-load IIFE for a Tier-2 `<var server>` whose RHS
+ * is a PARAM-FREE inline `?{}` query (§52.6.5 Pattern C).
+ *
+ * The `?{}` on the declaration RHS IS the cell's mount load. The query runs
+ * server-side through the compiler-generated `/__serverLoad/<var>` route
+ * (emitted by generateServerJs, running the cell's actual `?{}` via the
+ * canonical §44 SQL lowering); the client fetches it on mount and lands the
+ * result via the ordinary reactive set, replacing the in-flight placeholder
+ * (`not`) once the query resolves (§52.4.3 — the placeholder is the VALUE shown
+ * while loading, not the query).
+ *
+ * Symmetric to `emitServerAuthorityLoad` (the Tier-1 `SELECT * FROM <table>`
+ * load): both POST an empty body. A PARAM-BEARING query (`?{ … ${@cell} … }`)
+ * needs POST-body param-passing — a bounded follow-on, NOT this path (the caller
+ * filters it out via collect.ts `serverVarDeclLoadKind` and emits W-AUTH-004).
+ *
+ * Pattern:
+ * ```javascript
+ * // <driver server> = ?{…} — inline-?{} RHS load on mount (§52.6.5 Pattern C)
+ * (async () => {
+ *   const _r = await fetch("/__serverLoad/driver", { method: "POST", ... });
+ *   _scrml_reactive_set("driver", await _r.json());
+ * })();
+ * ```
+ *
+ * @param varName - reactive variable name (no `@` prefix)
+ */
+export function emitDeclRhsSqlLoad(varName: string): string[] {
+  const varJs = JSON.stringify(varName);
+  const routeJs = JSON.stringify(`/__serverLoad/${varName}`);
+  return [
+    `// <${varName} server> = ?{…} — inline-?{} RHS load on mount (§52.6.5 Pattern C)`,
+    `(async () => {`,
+    `  const _scrml_sl_res = await fetch(${routeJs}, {`,
+    `    method: "POST",`,
+    `    headers: { "Content-Type": "application/json" },`,
+    `    body: "{}",`,
+    `  });`,
+    `  _scrml_reactive_set(${varJs}, await _scrml_sl_res.json());`,
+    `})();`,
+  ];
+}
+
+// ---------------------------------------------------------------------------
 // §52.6.2 Assignment Semantics — local landing only (NO emitter)
 // ---------------------------------------------------------------------------
 //

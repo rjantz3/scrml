@@ -10,10 +10,11 @@ import {
   collectServerVarDecls,
   callableServerVarDecls,
   collectServerAuthorityTypes,
+  serverVarDeclLoadKind,
 } from "./collect.ts";
 import { collectDerivedVarNames, buildFunctionBodyRegistry, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { collectChannelNodes, emitChannelClientJs, parseChannelReconnect } from "./emit-channel.ts";
-import { emitInitialLoad, emitUnifiedMountHydrate, emitServerAuthorityLoad } from "./emit-sync.ts";
+import { emitInitialLoad, emitUnifiedMountHydrate, emitServerAuthorityLoad, emitDeclRhsSqlLoad } from "./emit-sync.ts";
 import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-parse-variant.ts";
 import type { EncodingContext } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
@@ -670,6 +671,22 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     const coalesceMount = callableDecls.length >= 2;
     for (const decl of serverVarDecls) {
       const varName: string = decl.name as string;
+      // §52.6.5 Pattern C (S216 disposition A): a `<var server> = ?{…}` decl
+      // carries a structured `sqlNode` (ss1 item-3 leak-stop) — the inline `?{}`
+      // IS the cell's mount load. A PARAM-FREE query loads via the
+      // `/__serverLoad/<var>` route (POST empty body, mirror of Tier-1). A
+      // PARAM-BEARING query (`?{ … ${@cell} … }`) needs POST-body param-passing
+      // (bounded follow-on) — it emits NO load here; the type system surfaces
+      // W-AUTH-004 so the dev sees the cell will not hydrate.
+      const loadKind = serverVarDeclLoadKind(decl);
+      if (loadKind === "sql-load") {
+        for (const l of emitDeclRhsSqlLoad(varName)) lines.push(l);
+        continue;
+      }
+      if (loadKind === "param-bearing") {
+        // No load emitted (W-AUTH-004 diagnostic owns the dev-facing nudge).
+        continue;
+      }
       // Phase 4d: ExprNode-first, string fallback
       const initExpr: string = (decl as any).initExpr ? emitStringFromTree((decl as any).initExpr) : (typeof decl.init === "string" ? decl.init : "");
       // Emit per-var initial-load IIFE only when NOT coalescing OR when this var

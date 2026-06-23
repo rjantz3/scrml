@@ -17081,6 +17081,7 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-AUTH-004 | §52.11 | Two declarations of the same state type with conflicting `authority=` values | Error |
 | E-AUTH-005 | §52.11 | `<var server>` declared inside a client-only component (no server context) | Error |
 | W-AUTH-001 | §52.11 | `<var server>` has no detectable initial load pattern | Warning |
+| W-AUTH-004 | §52.6.5 | `<var server>` has a PARAM-BEARING inline `?{}` RHS (§52.6.5 Pattern C); param-passing on `/__serverLoad/<var>` is not yet shipped, so the cell will not hydrate — use a param-free query or an `on mount` block | Warning |
 | W-ATTR-001 | §52.13 | Attribute name not recognized on a scrml-special element (informational; attribute is forwarded to HTML as-is) | Warning |
 | W-ATTR-002 | §52.13 | Attribute value-shape not recognized (e.g. `auth="role:X"` on `<page>`) — silently accepted but has no compile-time effect | Warning |
 | E-CONTRACT-001 | §53.11 | Inline predicate violation at compile time (statically provable) | Error |
@@ -25426,11 +25427,17 @@ source-subscription is the ONLY guard-free path.
 ```scrml
 type DriverStatus:enum = { OffDuty, Driving, OnDuty, Sleeper }
 
-<!-- @driver is a §52 server-authority cell (a server ?{} / §38 push populates
-     .current_status — a DriverStatus variant NAME). It may NOT be resolved at
-     construction (fetch-on-mount); the engine sits at the initial=.Literal
-     placeholder until it resolves. -->
-<driver server> : Driver = ?{ select * from drivers where id = ${@driverId} }.get()
+<!-- @driver is a §52 server-authority cell. The inline ?{} on the RHS IS the
+     cell's mount load (§52.6.5 Pattern C): the compiler emits a
+     /__serverLoad/driver route running the SELECT server-side + a client fetch
+     that hydrates @driver on mount. It may NOT be resolved at construction
+     (fetch-on-mount); the engine sits at the initial=.Literal placeholder until
+     it resolves. The engine RIDES this cell's load — it does NOT self-load. -->
+<driver server> : Driver = ?{ `SELECT * FROM drivers WHERE id = 1` }.get()
+<!-- The PARAM-BEARING variant `?{ ... WHERE id = ${@driverId} }` is a bounded
+     follow-on (POST-body param-passing on /__serverLoad/<var>, W-AUTH-004 until
+     shipped — §52.6.5 Pattern C). For a param-bearing load today, use an
+     `on mount` block (§52.6.5 Pattern B). -->
 
 <engine for=DriverStatus server=@driver.current_status initial=.OffDuty>
   <OffDuty rule=(.Driving | .OnDuty | .Sleeper) : "Off duty">
@@ -29155,14 +29162,16 @@ A `<var server>` declaration at the instance level is appropriate for primitive 
 
 #### 52.4.3 Initial Value Semantics
 
-The expression on the right-hand side of a `<varName server> = expr` declaration is the **client placeholder**. It is displayed while the server fetch is in flight. It is NOT sent to the server. It is NOT the authoritative initial value.
+When the right-hand side of a `<varName server> = expr` declaration is a **literal value** (`0`, `[]`, `not`, a string, a struct literal), that value is the **client placeholder**. It is displayed while the server fetch is in flight (§52.4.4 SHALL-generate a fetch-on-mount for every `<varName server>`). It is NOT sent to the server. It is NOT the authoritative initial value.
 
-A `<varName server>` with an initial value of `not` (§42) means "no placeholder — render nothing until the server responds."
+A `<varName server>` with a literal-value RHS of `not` (§42) means "no placeholder — render nothing until the server responds."
 
 ```scrml
 <userProfile server> = not     // renders nothing until profile loads
 <count server>       = 0       // renders 0 until server responds with authoritative count
 ```
+
+The "NOT sent to the server" clause applies to the **placeholder VALUE** shown in-flight — it does NOT govern whether an inline `?{}` on the RHS may *define the load query*. When the RHS is an inline `?{}` (§52.6.5 **Pattern C**), that `?{}` IS the cell's mount-load query: it runs server-side via the compiler-generated `/__serverLoad/<varName>` route, and the in-flight placeholder VALUE the client displays is absence (`not`) until the query resolves. The query (the `?{}`) defines the load; the placeholder (`not`) is what shows while it loads. These are distinct — see §52.6.5 Pattern C.
 
 #### 52.4.4 Normative Statements — Instance-Level Authority
 
@@ -29383,7 +29392,23 @@ on mount {
 }
 ```
 
-If neither pattern is present on a `<var server>` declaration, the compiler SHALL emit a warning (W-AUTH-001) indicating that no initial load was detected. The cell will display its placeholder value until an explicit assignment occurs.
+**Pattern C — Inline `?{}` on the declaration RHS:**
+
+> **Added 2026-06-23 (S216 ruling — disposition A=LOAD).** When the RHS of a `<var server>` declaration is an inline `?{}` query, that `?{}` IS the cell's mount load. The compiler emits a `/__serverLoad/<var>` route that runs the query server-side (lowered through the canonical §44 SQL emitter — the `.get()`/`.all()` terminator and any bound params are handled identically to a `?{}` inside a server function body) and a client fetch that POSTs to it on mount and hydrates the cell via the ordinary reactive set. The in-flight placeholder VALUE the client displays is absence (`not`) until the query resolves (§52.4.3). The query is SERVER-only — it never appears in the client bundle. This is the form §51.0.E (the E-leg) uses: the source cell an `<engine server=@source>` rides is populated by exactly this load.
+
+```scrml
+type Driver:struct = { id: number, current_status: string }
+
+// The inline ?{} IS the load. The compiler emits /__serverLoad/driver running the
+// SELECT server-side; the client fetches it on mount. `not` shows in-flight.
+<driver server> : Driver = ?{`SELECT * FROM drivers WHERE id = 1`}.get()
+```
+
+The `server @var = ?{}` form (the `@`-prefixed declaration inside a `${...}` logic block) is identical — both carry the same structured `?{}` query and load the same way.
+
+**Param-passing (PARAM-BEARING SELECT — bounded follow-on, not yet shipped).** A Pattern-C query that interpolates a client-local cell — `?{`SELECT * FROM drivers WHERE id = ${@driverId}`}.get()` — needs the client-local value passed up to `/__serverLoad/<var>` in the POST body (the params are resolved on the client; the built route POSTs an empty body). Until that param-passing mechanism ships, a param-bearing Pattern-C decl emits the info diagnostic **W-AUTH-004** (the cell will NOT hydrate on mount) steering the developer to a param-free query or the Pattern-B `on mount` form (where `${@driverId}` is an ordinary server-fn param boundary). This is distinct from the E-AUTH-001 INSERT/UPDATE/DELETE write-param guard (§52.11) — a SELECT read-param is not a persisted write.
+
+If neither Pattern A, B, nor C is present on a `<var server>` declaration (a bare literal-value placeholder with no detectable load), the compiler SHALL emit a warning (W-AUTH-001) indicating that no initial load was detected. The cell will display its placeholder value until an explicit assignment occurs.
 
 #### 52.6.6 Write Function Convention for Tier 2 `<var server>`
 
