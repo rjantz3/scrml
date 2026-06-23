@@ -2048,7 +2048,15 @@ describe("A1a Step 11.0f — `<x> = ?{SQL}` BLOCK_REF newline-as-separator bound
     expect(decls.length).toBe(2);
     const byName = Object.fromEntries(decls.map((d) => [d.name, d]));
     expect(byName.x.shape).toBe("plain");
-    expect(byName.x.init).toBe("?{`SELECT 1`}");
+    // §44 inline-SQL init: the markup-form `<x> = ?{SQL}` now routes the inline
+    // `?{}` through tryConsumeSqlInit → a structured `sqlNode` with `init: ""`,
+    // matching every other decl form (let/const/@x/server @x). Pre-fix the raw
+    // `?{`SELECT 1`}` string was kept in `init` (which leaked an unresolved
+    // sql-ref placeholder / E-CODEGEN-INVALID-JS into codegen). The boundary
+    // assertion (TWO decls) is preserved.
+    expect(byName.x.init).toBe("");
+    expect(byName.x.sqlNode?.kind).toBe("sql");
+    expect(byName.x.sqlNode?.query).toBe("SELECT 1");
     expect(byName.x.structuralForm).toBe(true);
     expect(byName.y.shape).toBe("plain");
     expect(byName.y.init).toBe("0");
@@ -2072,7 +2080,10 @@ describe("A1a Step 11.0f — `<x> = ?{SQL}` BLOCK_REF newline-as-separator bound
     const decls = findKind(ast, "state-decl");
     expect(decls.length).toBe(2);
     const byName = Object.fromEntries(decls.map((d) => [d.name, d]));
-    expect(byName.x.init).toBe("?{`SELECT 1`}");
+    // §44 inline-SQL init now lands in `sqlNode` (init: "") — see §S11F.1 note.
+    expect(byName.x.init).toBe("");
+    expect(byName.x.sqlNode?.kind).toBe("sql");
+    expect(byName.x.sqlNode?.query).toBe("SELECT 1");
     expect(byName.x.structuralForm).toBe(true);
     expect(byName.y.init).toBe("0");
     expect(byName.y.structuralForm).toBe(false);
@@ -2097,7 +2108,10 @@ describe("A1a Step 11.0f — `<x> = ?{SQL}` BLOCK_REF newline-as-separator bound
     expect(decls.length).toBe(2);
     const byName = Object.fromEntries(decls.map((d) => [d.name, d]));
     expect(byName.users.shape).toBe("plain");
-    expect(byName.users.init).toBe("?{`SELECT id FROM users`}");
+    // §44 inline-SQL init now lands in `sqlNode` (init: "") — see §S11F.1 note.
+    expect(byName.users.init).toBe("");
+    expect(byName.users.sqlNode?.kind).toBe("sql");
+    expect(byName.users.sqlNode?.query).toBe("SELECT id FROM users");
     expect(byName.count.shape).toBe("derived");
     expect(byName.count.isConst).toBe(true);
     expect(byName.count.init).toBe("0");
@@ -2120,7 +2134,10 @@ describe("A1a Step 11.0f — `<x> = ?{SQL}` BLOCK_REF newline-as-separator bound
     const decls = findKind(ast, "state-decl");
     expect(decls.length).toBe(2);
     const byName = Object.fromEntries(decls.map((d) => [d.name, d]));
-    expect(byName.x.init).toBe("?{`SELECT 1`}");
+    // §44 inline-SQL init now lands in `sqlNode` (init: "") — see §S11F.1 note.
+    expect(byName.x.init).toBe("");
+    expect(byName.x.sqlNode?.kind).toBe("sql");
+    expect(byName.x.sqlNode?.query).toBe("SELECT 1");
     expect(byName.y.init).toBe("0");
     expect(byName.y.typeAnnotation).toBe("number");
     assertNoHtmlFragmentMatching(ast, /<\s*x\s*>|<\s*y\s*>/);
@@ -2146,7 +2163,10 @@ describe("A1a Step 11.0f — `<x> = ?{SQL}` BLOCK_REF newline-as-separator bound
     // Three: x, formRes (compound parent), a (compound child)
     expect(decls.length).toBe(3);
     const byName = Object.fromEntries(decls.map((d) => [d.name, d]));
-    expect(byName.x.init).toBe("?{`SELECT 1`}");
+    // §44 inline-SQL init now lands in `sqlNode` (init: "") — see §S11F.1 note.
+    expect(byName.x.init).toBe("");
+    expect(byName.x.sqlNode?.kind).toBe("sql");
+    expect(byName.x.sqlNode?.query).toBe("SELECT 1");
     expect(byName.formRes).toBeDefined();
     expect(byName.a.init).toBe("0");
     assertNoHtmlFragmentMatching(ast, /<\s*x\s*>|<\s*formRes\s*>|<\s*a\s*>/);
@@ -2167,9 +2187,13 @@ describe("A1a Step 11.0f — `<x> = ?{SQL}` BLOCK_REF newline-as-separator bound
     const decls = findKind(ast, "state-decl");
     expect(decls.length).toBe(3);
     const byName = Object.fromEntries(decls.map((d) => [d.name, d]));
-    expect(byName.a.init).toBe("?{`SELECT 1`}");
-    expect(byName.b.init).toBe("?{`SELECT 2`}");
-    expect(byName.c.init).toBe("?{`SELECT 3`}");
+    // §44 inline-SQL init now lands in `sqlNode` (init: "") — see §S11F.1 note.
+    expect(byName.a.init).toBe("");
+    expect(byName.a.sqlNode?.query).toBe("SELECT 1");
+    expect(byName.b.init).toBe("");
+    expect(byName.b.sqlNode?.query).toBe("SELECT 2");
+    expect(byName.c.init).toBe("");
+    expect(byName.c.sqlNode?.query).toBe("SELECT 3");
     assertNoHtmlFragmentMatching(ast, /<\s*a\s*>|<\s*b\s*>|<\s*c\s*>/);
   });
 

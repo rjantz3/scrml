@@ -1,0 +1,15 @@
+<program db="sqlite:./test.db">
+type DriverStatus:enum = { OffDuty, Driving, OnDuty, Sleeper }
+type Driver = { id: number, current_status: string }
+
+<driver server> : Driver = ?{ `SELECT * FROM drivers WHERE id = 1` }.get()
+
+<engine for=DriverStatus server=@driver.current_status initial=.OffDuty>
+  <OffDuty rule=(.Driving | .OnDuty | .Sleeper) : "Off duty">
+  <Driving rule=(.OnDuty | .OffDuty)            : "Driving">
+  <OnDuty  rule=(.Driving | .OffDuty | .Sleeper) : "On duty">
+  <Sleeper rule=(.OffDuty | .OnDuty)            : "Sleeper berth">
+</>
+
+<main><p>loaded</p></main>
+</program>

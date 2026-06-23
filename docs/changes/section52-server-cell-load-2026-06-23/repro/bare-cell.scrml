@@ -1,0 +1,4 @@
+<program db="sqlite:./test.db">
+<driver server> = ?{ `SELECT * FROM drivers WHERE id = 1` }.get()
+<main><p>loaded</p></main>
+</program>

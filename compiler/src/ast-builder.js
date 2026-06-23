@@ -5990,6 +5990,42 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     );
     const _cursorBeforeRhs = i;
 
+    // §44 inline-SQL init for the V5-strict markup-form decl
+    // (`<x> = ?{...}.method()` / `<x server> = ?{...}.method()` / `const <x> = ?{...}`).
+    // Every OTHER decl form (let/const at 6762/6864, the legacy `@x`/`server @x`
+    // at 6915/6941, top-level at 10342/10514) routes an inline `?{}` RHS through
+    // tryConsumeSqlInit → a structured `sqlNode` with `init: ""`. The markup
+    // form was the lone gap: it collected the `?{}` as a raw expression string,
+    // so `safeParseExprToNode` produced an unresolved `sql-ref` ExprNode
+    // (nodeId:-1) that codegen rendered as the self-flagged
+    // `null /* sql-ref unresolved … upstream parser/AST bug, please report */`
+    // placeholder (non-server `<x> = ?{}`) or leaked the raw `?{}` into client JS
+    // → E-CODEGEN-INVALID-JS (`<x server> = ?{}`). type-system.ts:8894 already
+    // ASSUMES this site attaches `sqlNode`; this closes the contract gap.
+    // Mirrors the `server @x = ?{}` shape at ~6915.
+    {
+      const _sqlInitStruct = tryConsumeSqlInit();
+      if (_sqlInitStruct) {
+        const _sqlNode = {
+          id: ++counter.next,
+          kind: "state-decl",
+          name,
+          init: "",
+          sqlNode: _sqlInitStruct,
+          structuralForm: true,
+          isConst: !!isConst,
+          shape: isConst ? "derived" : "plain",
+          defaultExpr,
+          pinned: pinnedFlag,
+          ...(serverFlag ? { isServer: true } : {}),
+          ...(reactivity ? { reactivity } : {}),
+          ...(typeAnnotation ? { typeAnnotation } : {}),
+          span: spanOf(startTok, peek()),
+        };
+        return _sqlNode;
+      }
+    }
+
     // Collect the RHS expression (stops at `;`, unbalanced `}`, STMT_KEYWORDS,
     // BLOCK_REF, or EOF — same boundary rules as the legacy `@NAME = init` path).
     // Phase A1a Step 11.0a — when this call is recursive inside a compound

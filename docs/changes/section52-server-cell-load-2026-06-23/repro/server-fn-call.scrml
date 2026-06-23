@@ -1,0 +1,14 @@
+<program db="sqlite:./test.db">
+${
+  server function loadCards() {
+    return ?{ `SELECT * FROM cards` }.all()
+  }
+}
+<cards server> = []
+${
+  on mount {
+    @cards = loadCards()
+  }
+}
+<main><p>{@cards.length}</p></main>
+</program>
