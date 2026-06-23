@@ -45,6 +45,7 @@ import { emitMatchExpr as emitStructuredMatchExpr } from "./emit-control-flow.ts
 import { SYNTH_PROPERTY_NAMES } from "../symbol-table.ts";
 import { srcmapMark } from "./srcmap-provenance.ts";
 import { resolveLogLoc } from "./log-loc.ts";
+import { exprNodeCollectCallees } from "../expression-parser.ts";
 // markup-value-in-expression-2026-06-17 (a)+(b) — DOM-node lowering for
 // markup-as-value in expression position (shared with form (c) `return <markup>`).
 import { emitMarkupValueExpr } from "./emit-lift.js";
@@ -1748,6 +1749,29 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
   const callee = emitReceiver(node.callee, ctx);
   const args = node.args.map(a => emitExpr(a, ctx)).join(", ");
 
+  // Issue #1 (parent scrmlTS) — server-fn → sibling server-fn in-process call.
+  // The per-fn route handler (`_scrml_handler_*`) is a Request->Response wrapper,
+  // NOT a plain callable, so a body-level `nextOrder()` reference had no binding
+  // ("nextOrder is not defined" at runtime). emit-server.ts emits a plain
+  // `async function <name>(<params>) { ... }` peer callable for each composed
+  // server fn and registers the name in `ctx.serverFnNames`; here we resolve the
+  // call to that peer and `await` it (the peer is async — without the await the
+  // body leaks an unawaited Promise into downstream SQL/params). This is placed
+  // BEFORE the navigate/render/log builtin lowerings so a server fn that shadows
+  // a builtin name dispatches to the user's peer, not the builtin. Only fires in
+  // server-mode emission; a local of the same name shadows the peer.
+  if (
+    ctx.mode === "server" &&
+    !node.optional &&
+    node.callee.kind === "ident" &&
+    typeof node.callee.name === "string" &&
+    ctx.serverFnNames != null &&
+    ctx.serverFnNames.has(node.callee.name) &&
+    !(ctx.declaredNames != null && ctx.declaredNames.has(node.callee.name))
+  ) {
+    return `await ${callee}(${args})`;
+  }
+
   // navigate() → client-side routing
   if (node.callee.kind === "ident" && node.callee.name === "navigate") {
     return `_scrml_navigate(${args})`;
@@ -1819,27 +1843,6 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
     return args.length > 0
       ? `_scrml_log(${tagArgs}, ${args})`
       : `_scrml_log(${tagArgs})`;
-  }
-
-  // Issue #1 (parent scrmlTS) — server-fn → sibling server-fn in-process call.
-  // The per-fn route handler (`_scrml_handler_*`) is a Request->Response wrapper,
-  // NOT a plain callable, so a body-level `nextOrder()` reference had no binding
-  // ("nextOrder is not defined" at runtime). emit-server.ts now emits a plain
-  // `async function <name>(<params>) { ... }` peer callable for each composed
-  // server fn and registers the name in `ctx.serverFnNames`; here we resolve the
-  // call to that peer and `await` it (the peer is async — without the await the
-  // body would leak an unawaited Promise into downstream SQL/params). Only fires
-  // in server-mode emission; a local of the same name shadows the peer.
-  if (
-    ctx.mode === "server" &&
-    !node.optional &&
-    node.callee.kind === "ident" &&
-    typeof node.callee.name === "string" &&
-    ctx.serverFnNames != null &&
-    ctx.serverFnNames.has(node.callee.name) &&
-    !(ctx.declaredNames != null && ctx.declaredNames.has(node.callee.name))
-  ) {
-    return `await ${callee}(${args})`;
   }
 
   const call = node.optional ? "?.(" : "(";
@@ -1915,10 +1918,37 @@ function emitLambda(node: LambdaExpr, ctx: EmitExprContext): string {
   const params = node.params.map(p => emitLambdaParam(p, ctx)).join(", ");
   const asyncPrefix = node.isAsync ? "async " : "";
 
+  // Issue #1 (parent scrmlTS) — a sibling server-fn call inside a SYNCHRONOUS
+  // callback (`xs.map(x => peer(x))`, `.filter`, `.forEach`, a sort comparator)
+  // cannot be lowered: `await` is illegal in a non-async lambda, and silently
+  // making the lambda `async` would hand `.map`/`.forEach` an array of Promises
+  // instead of values. So we DON'T lower the call here — clearing `serverFnNames`
+  // for the body emits a bare `peer(...)` (parseable JS) instead of an `await`
+  // the compiler's own validator would reject. emit-server.ts detects this same
+  // shape against the AST and raises the actionable `E-SERVER-FN-IN-SYNC-CALLBACK`
+  // diagnostic there (it owns the clean diagnostics accumulator; wiring one
+  // through expression emission would surface unrelated previously-swallowed
+  // errors — e.g. latent `E-CG-003` in shim `match` arms).
+  let bodyCtx = ctx;
+  if (
+    !node.isAsync &&
+    ctx.mode === "server" &&
+    ctx.serverFnNames != null &&
+    node.body.kind === "expr"
+  ) {
+    const callees = exprNodeCollectCallees(node.body.value as unknown as Parameters<typeof exprNodeCollectCallees>[0]);
+    const hit = callees.find(
+      (c) => ctx.serverFnNames!.has(c) && !(ctx.declaredNames != null && ctx.declaredNames.has(c)),
+    );
+    if (hit) {
+      bodyCtx = { ...ctx, serverFnNames: null };
+    }
+  }
+
   if (node.fnStyle === "function") {
     // function(x) { ... }
     if (node.body.kind === "expr") {
-      return `${asyncPrefix}function(${params}) { return ${emitExpr(node.body.value, ctx)}; }`;
+      return `${asyncPrefix}function(${params}) { return ${emitExpr(node.body.value, bodyCtx)}; }`;
     }
     // Block body — stmts are LogicStatement[], not ExprNode, so we can't emit them here.
     // This path should only be hit once logic-statement emission is integrated (Slice 5).
@@ -1928,7 +1958,7 @@ function emitLambda(node: LambdaExpr, ctx: EmitExprContext): string {
 
   // Arrow or fn style
   if (node.body.kind === "expr") {
-    const body = emitExpr(node.body.value, ctx);
+    const body = emitExpr(node.body.value, bodyCtx);
     const wrapped = arrowBodyNeedsParens(node.body.value) ? `(${body})` : body;
     return `${asyncPrefix}(${params}) => ${wrapped}`;
   }

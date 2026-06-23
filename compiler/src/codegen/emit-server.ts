@@ -1,6 +1,6 @@
 import { CGError } from "./errors.ts";
 import { genVar, getVarCounter, setVarCounter } from "./var-counter.ts";
-import { routePath, paramSignature } from "./utils.ts";
+import { routePath, paramSignature, paramName } from "./utils.ts";
 import { collectFunctions, collectServerVarDecls, callableServerVarDecls, collectServerAuthorityTypes, isServerOnlyNode } from "./collect.ts";
 import { emitLogicNode, emitFnShortcutBody } from "./emit-logic.ts";
 import { getNodes } from "./collect.ts";
@@ -13,7 +13,8 @@ import { emitServerParamCheck, parsePredicateAnnotation } from "./emit-predicate
 import { resolveDbDriver } from "./db-driver.ts";
 import { returnTypeAllowsAbsence, SERVER_WIRE_ENCODER_HELPER } from "./wire-format.ts";
 import { SERVER_LOG_HELPER } from "./log-loc.ts";
-import { parseExprToNode } from "../expression-parser.ts";
+import { parseExprToNode, exprNodeCollectCallees } from "../expression-parser.ts";
+import { extractCalleeNames } from "./scheduling.ts";
 
 // g-pure-module-server-emit (S207): sentinel line marking where deferred
 // local-`.scrml` server imports are re-injected after usage-pruning. Pruned by
@@ -1114,11 +1115,87 @@ export function generateServerJs(
     if (_proute?.cpsSplit || _proute?.isSSE) continue;
     if (channelFnMap.has(_pn)) continue;
     const _pparams: any[] = _pfn.params ?? [];
-    const _pparamNames: string[] = _pparams.map((p: any, i: number) =>
-      typeof p === "string" ? p.split(":")[0].trim() : (p.name ?? `_scrml_arg_${i}`)
-    );
+    const _pparamNames: string[] = _pparams.map((p: any, i: number) => paramName(p, i));
     _serverFnPeerNames.add(_pn);
     _peerCallableInfo.set(_pn, { fnNode: _pfn, paramNames: _pparamNames });
+  }
+
+  // Which simple peers are ACTUALLY called by some server-fn body? Resolve this
+  // from the AST call graph (`exprNodeCollectCallees` over every server-fn body,
+  // recursing through nested blocks), NOT by grepping the emitted handler text —
+  // the latter couples peer emission to the exact lowering of a call site and
+  // would silently drop a peer if that lowering ever changes. Scanning every
+  // body (not just route entry points) captures transitive edges: if A calls B
+  // and B calls C, scanning B's body discovers C even when C is never called
+  // directly from a handler.
+  const _calledPeerNames = new Set<string>();
+  {
+    // A peer call inside a SYNCHRONOUS callback (`xs.map(x => peer(x))`, etc.)
+    // cannot be lowered — `await` is illegal in a non-async lambda and an async
+    // lambda would yield Promises from `.map`/`.forEach`. emit-expr.ts emits a
+    // bare (non-awaited) call in that position so the artifact stays parseable;
+    // here we raise the actionable compile error. (Surfacing it from emit-expr
+    // would require threading the diagnostics accumulator through expression
+    // emission, which would also un-mask unrelated previously-swallowed errors.)
+    const _scanExprForSyncLambda = (en: any): void => {
+      if (!en || typeof en !== "object") return;
+      if (en.kind === "lambda" && !en.isAsync && en.body && en.body.kind === "expr" && en.body.value) {
+        const _lamParams = new Set<string>(
+          (Array.isArray(en.params) ? en.params : []).map((p: any) => p?.name).filter(Boolean),
+        );
+        const _hit = exprNodeCollectCallees(en.body.value)
+          .find((c) => _serverFnPeerNames.has(c) && !_lamParams.has(c));
+        if (_hit) {
+          const _sp = (en.span ?? {}) as { file?: string; start?: number; end?: number; line?: number; col?: number };
+          errors.push(new CGError(
+            "E-SERVER-FN-IN-SYNC-CALLBACK",
+            `E-SERVER-FN-IN-SYNC-CALLBACK: server function \`${_hit}\` is called inside a ` +
+            `synchronous callback. A server function runs asynchronously, but \`await\` is ` +
+            `not valid in a non-async callback (and making the callback async would make ` +
+            `\`.map\`/\`.forEach\` yield Promises instead of values). Refactor to a \`for\` loop ` +
+            `so the call runs in the server function's async body, e.g. ` +
+            `\`for (const x of xs) { ... ${_hit}(x) ... }\`.`,
+            { file: filePath ?? _sp.file ?? "", start: _sp.start ?? 0, end: _sp.end ?? 0, line: _sp.line ?? 1, col: _sp.col ?? 1 },
+            "error",
+          ));
+        }
+      }
+      for (const k in en) {
+        const v = en[k];
+        if (Array.isArray(v)) { for (const ch of v) _scanExprForSyncLambda(ch); }
+        else if (v && typeof v === "object") _scanExprForSyncLambda(v);
+      }
+    };
+    const _seen = new WeakSet<object>();
+    const _visitForCallees = (node: any): void => {
+      if (!node || typeof node !== "object" || _seen.has(node)) return;
+      _seen.add(node);
+      const _exprField = node.exprNode ?? node.initExpr;
+      if (_exprField && typeof _exprField === "object") {
+        for (const c of exprNodeCollectCallees(_exprField)) {
+          if (_serverFnPeerNames.has(c)) _calledPeerNames.add(c);
+        }
+        _scanExprForSyncLambda(_exprField);
+      } else {
+        const _raw = node.expr ?? node.init;
+        if (typeof _raw === "string") {
+          for (const c of extractCalleeNames(_raw)) {
+            if (_serverFnPeerNames.has(c)) _calledPeerNames.add(c);
+          }
+        }
+      }
+      for (const k in node) {
+        // `exprNode`/`initExpr` are already covered by exprNodeCollectCallees;
+        // re-walking their internals would be redundant (and could double-count).
+        if (k === "exprNode" || k === "initExpr") continue;
+        const v = node[k];
+        if (Array.isArray(v)) { for (const ch of v) _visitForCallees(ch); }
+        else if (v && typeof v === "object") _visitForCallees(v);
+      }
+    };
+    for (const { fnNode: _sfn } of serverFns) {
+      for (const _stmt of (_sfn?.body ?? [])) _visitForCallees(_stmt);
+    }
   }
 
   for (const { fnNode, route } of serverFns) {
@@ -1545,7 +1622,7 @@ export function generateServerJs(
               // would otherwise produce `/_* sql-ref:N *_/` from the SQL-placeholder
               // ExprNode that safeParseExprToNode preprocesses `?{}` into.
               if (stmt.sqlNode && stmt.sqlNode.kind === "sql") {
-                const sqlStmt = serverRewriteEmitted(emitLogicNode(stmt.sqlNode, { boundary: "server", channelOwnedCells: _channelOwnedCells })) ?? "";
+                const sqlStmt = serverRewriteEmitted(emitLogicNode(stmt.sqlNode, { boundary: "server", channelOwnedCells: _channelOwnedCells, serverFnNames: _serverFnPeerNames })) ?? "";
                 const sqlExpr = sqlStmt.replace(/;\s*$/, "");
                 lines.push(`    const _scrml_cps_return = ${sqlExpr};`);
                 continue;
@@ -1554,7 +1631,7 @@ export function generateServerJs(
               // The literal string "undefined" used as a fallback default would interpolate
               // the JS `undefined` keyword into compiled output, which is forbidden in scrml-
               // semantics output (OQ-5(a) ratified S90 → use "null" instead).
-              const initExpr = emitExprField(stmt.initExpr, stmt.init ?? "null", { mode: "server" });
+              const initExpr = emitExprField(stmt.initExpr, stmt.init ?? "null", { mode: "server", serverFnNames: _serverFnPeerNames });
               lines.push(`    const _scrml_cps_return = ${initExpr};`);
               continue;
             }
@@ -1738,7 +1815,7 @@ export function generateServerJs(
               // the useBaselineCsrf=true CPS site above. Route SQL-init reactive
               // decls through emit-logic case "sql" via the structured sqlNode.
               if (stmt.sqlNode && stmt.sqlNode.kind === "sql") {
-                const sqlStmt = serverRewriteEmitted(emitLogicNode(stmt.sqlNode, { boundary: "server", channelOwnedCells: _channelOwnedCellsNonCsrf })) ?? "";
+                const sqlStmt = serverRewriteEmitted(emitLogicNode(stmt.sqlNode, { boundary: "server", channelOwnedCells: _channelOwnedCellsNonCsrf, serverFnNames: _serverFnPeerNames })) ?? "";
                 const sqlExpr = sqlStmt.replace(/;\s*$/, "");
                 lines.push(`    const _scrml_cps_return = ${sqlExpr};`);
                 continue;
@@ -1747,7 +1824,7 @@ export function generateServerJs(
               // The literal string "undefined" used as a fallback default would interpolate
               // the JS `undefined` keyword into compiled output, which is forbidden in scrml-
               // semantics output (OQ-5(a) ratified S90 → use "null" instead).
-              const initExpr = emitExprField(stmt.initExpr, stmt.init ?? "null", { mode: "server" });
+              const initExpr = emitExprField(stmt.initExpr, stmt.init ?? "null", { mode: "server", serverFnNames: _serverFnPeerNames });
               lines.push(`    const _scrml_cps_return = ${initExpr};`);
               continue;
             }
@@ -1842,19 +1919,17 @@ export function generateServerJs(
   }
 
   // ---- Issue #1 (parent scrmlTS): emit in-process peer callables ----
-  // For every "simple" server fn that some server-fn body actually calls (the
-  // serverFnNames lowering emits `await <name>(`), emit a plain module-scope
-  // `async function <name>(<params>) { <body> }` so the call resolves in-process
-  // instead of referencing the undefined `<name>` symbol. We gate on actual
-  // usage (scan the already-emitted handler text — every server fn has a handler,
-  // so every peer-call edge appears there) to keep non-composing programs
-  // byte-identical to the pre-fix output.
-  if (_serverFnPeerNames.size > 0) {
-    const _emittedHandlers = lines.join("\n");
-    for (const [_peerName, _peerInfo] of _peerCallableInfo) {
-      const _escPeer = _peerName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const _calledRe = new RegExp(`\\bawait\\s+${_escPeer}\\s*\\(`);
-      if (!_calledRe.test(_emittedHandlers)) continue;
+  // For every "simple" server fn that some server-fn body actually calls (per the
+  // `_calledPeerNames` AST call-graph scan above), emit a plain module-scope
+  // `async function <name>(<params>) { <body> }` so a sibling's `await <name>(...)`
+  // resolves in-process instead of referencing the undefined `<name>` symbol.
+  // Gating on real call-graph usage keeps non-composing programs byte-identical
+  // to the pre-fix output, and — unlike grepping the emitted handler text — does
+  // not couple peer emission to the exact way a call site lowers.
+  if (_calledPeerNames.size > 0) {
+    for (const _peerName of _calledPeerNames) {
+      const _peerInfo = _peerCallableInfo.get(_peerName);
+      if (!_peerInfo) continue;
       const _peerOpts = {
         boundary: "server" as const,
         channelOwnedCells: null,
