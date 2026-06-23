@@ -181,3 +181,102 @@ describe("Issue #1 — server fn calling another server fn", () => {
     ]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Review hardening — edge cases surfaced by /code-review.
+// ---------------------------------------------------------------------------
+
+describe("Issue #1 — review hardening", () => {
+  // Finding 1: a peer call inside a SYNCHRONOUS callback can't be lowered to
+  // `await` (invalid JS in a non-async lambda) nor silently made async (would
+  // return Promises from .map). It must surface a clear diagnostic, NOT emit
+  // code the compiler's own validator rejects.
+  test("peer call inside a synchronous callback yields E-SERVER-FN-IN-SYNC-CALLBACK", () => {
+    const src = `
+<program>
+<db src="./items.db" tables="items">
+  \${
+    server function lookup(x) {
+      const row = ?{\`SELECT n FROM items WHERE id = \${x}\`}.get()
+      return row.n
+    }
+    server function bumpAll(ids) {
+      const out = ids.map(x => lookup(x))
+      return out
+    }
+  }
+  <button onclick=bumpAll([1,2])>Go</button>
+</>
+</program>`;
+    const { errors } = compileToFiles(src, "sync-callback", {
+      "items.db": ["CREATE TABLE items (id INTEGER PRIMARY KEY, n INTEGER)"],
+    });
+    const codes = errors.map((e) => e.code);
+    expect(codes).toContain("E-SERVER-FN-IN-SYNC-CALLBACK");
+    // It must NOT be the generic "compiler emitted invalid JS" defect framing.
+    expect(codes).not.toContain("E-CODEGEN-INVALID-JS");
+  });
+
+  // Finding 2: a peer call that becomes a CPS return-var initializer must be
+  // awaited AND its peer callable emitted (previously emitted a bare,
+  // unawaited `nextId();` with no peer → ReferenceError + leaked Promise).
+  test("peer call as a CPS return-var init is awaited and the peer is emitted", () => {
+    const src = `
+<program idempotency-store="sqlite">
+<db src="./items.db" tables="items">
+  \${ @result = 0 }
+  \${
+    server function nextId() {
+      const row = ?{\`SELECT MAX(id) AS m FROM items\`}.get()
+      return row.m
+    }
+    server function make() {
+      ?{\`UPDATE items SET n = n + 1 WHERE id = 1\`}.run()
+      @result = nextId()
+      return @result
+    }
+  }
+  <p>\${@result}</p>
+  <button onclick=make()>Make</button>
+</>
+</program>`;
+    const { errors, serverJsPath } = compileToFiles(src, "cps-init", {
+      "items.db": ["CREATE TABLE items (id INTEGER PRIMARY KEY, n INTEGER)"],
+    });
+    expect(errors.filter((e) => !e.code?.startsWith("W-"))).toEqual([]);
+    const js = readFileSync(serverJsPath, "utf-8");
+    expect(js).toMatch(/async function nextId\(\) \{/);
+    expect(js).toContain("_scrml_cps_return = await nextId();");
+  });
+
+  // Finding 5: a server fn whose name collides with a builtin (navigate/render/
+  // log) must dispatch to the user's peer, not the builtin lowering.
+  test("a server fn named like a builtin still resolves to the peer", () => {
+    const src = `
+<program>
+<db src="./items.db" tables="items">
+  \${
+    server function navigate(to) {
+      ?{\`INSERT INTO items (name) VALUES (\${to})\`}.run()
+      return to
+    }
+    server function go() {
+      const r = navigate("home")
+      return r
+    }
+  }
+  <button onclick=go()>Go</button>
+</>
+</program>`;
+    const { errors, serverJsPath } = compileToFiles(src, "builtin-collision", {
+      "items.db": ["CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT)"],
+    });
+    expect(errors.filter((e) => !e.code?.startsWith("W-"))).toEqual([]);
+    const js = readFileSync(serverJsPath, "utf-8");
+    // The call must resolve to the peer (`await navigate(...)`), not the
+    // client-router builtin `_scrml_navigate(...)`.
+    expect(js).toContain("const r = await navigate(");
+    expect(js).not.toContain("_scrml_navigate(");
+    expect(js).toMatch(/async function navigate\(to\) \{/);
+  });
+});
