@@ -114,7 +114,7 @@ export interface LogicBinding {
    * arrow-function expression. emit-event-wiring consumes and emits subscribe +
    * per-iteration render.
    */
-  kind?: "if-chain-branch" | "if-chain-else" | "render-by-tag" | "errors-element" | "render-element" | "class-directive" | "attr-template";
+  kind?: "if-chain-branch" | "if-chain-else" | "render-by-tag" | "errors-element" | "render-element" | "class-directive" | "attr-template" | "bind-directive";
 
   // Conventional reactive / conditional binding fields.
   // Required for `kind === undefined` bindings (the default).
@@ -311,6 +311,45 @@ export interface LogicBinding {
   attrName?: string;
   directiveJsExpr?: string;
   directiveRefs?: string[];
+
+  /**
+   * Family-A convergence (HALF 1, 2026-06-23) — `bind:*` directive fields,
+   * registered ONLY when the bind: sits inside a `<match>` arm / `<engine>`
+   * state-child body (the registry has an active arm context). Required when
+   * `kind === "bind-directive"`.
+   *
+   * Same drop-class as the S212 class-/attr-template directives: the top-level
+   * emit-bindings.ts pass walks `collectMarkupNodes`, which never descends into
+   * arm bodies, so a `bind:value=@cell` on an input inside an arm body emitted
+   * its `data-scrml-bind-value` placeholder with NO querySelector + listener +
+   * `_scrml_effect` wiring — typed input was silently dropped
+   * (`g-bindvalue-wiring-dropped-in-match-arm`, HIGH).
+   *
+   * Unlike class:/attr-template (whose lowered JS expr is pre-computed at
+   * registration time), the bind:* lowering is element-shape-dependent (enum
+   * <select> coercion, numeric coercion, §53.7.2 predicate gating) and needs
+   * the markup node + the file-level enum/type maps. So this binding carries
+   * the raw `bindAttr` + `bindNode` references; `emitArmWireFunction`
+   * (emit-variant-guard.ts) feeds them to the shared `emitBindDirectiveBody`
+   * (emit-bindings.ts) with a `_root`-rooted acquire + a `_disposers` effect
+   * sink — the exact same lowering the top-level path uses.
+   *
+   *   bindAttr — the `bind:*` Attr node (carries `_bindId`, `.value`, `_flatBindKey`).
+   *   bindNode — the markup element the directive sits on (carries `tag` + `attributes`
+   *              for the <select>/numeric/type dispatch).
+   */
+  bindAttr?: any;
+  bindNode?: any;
+  /**
+   * The per-render `bindId` (the `data-scrml-bind-*` placeholder id) emitted
+   * into the arm-body HTML alongside this binding. Pinned at registration
+   * time because the engine renders a state-child body through generateHtml
+   * more than once (static initial-mount HTML + arm render fn), each minting
+   * a fresh id — `attr._bindId` is sticky from the first render and would
+   * diverge from the HTML this binding belongs to. emitArmWireFunction passes
+   * this as the acquire-selector override.
+   */
+  bindIdForArm?: string;
 
   /**
    * Phase A10 (S78, 2026-05-10) — engine arm context tag.

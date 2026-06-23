@@ -50,7 +50,7 @@ interface Attr {
  * @param fileAST — the file AST (raw or TypedFileAST)
  * @returns Map<varName, enumTypeName>
  */
-function buildEnumVarMap(fileAST: any): Map<string, string> {
+export function buildEnumVarMap(fileAST: any): Map<string, string> {
   const result = new Map<string, string>();
 
   // Step 1: build a map from variant name → enum type name from typeDecls
@@ -406,6 +406,221 @@ export function lowerAttrTemplateValue(rawValue: string): LoweredDirective {
   return { jsExpr, refs: Array.from(reactiveVars) };
 }
 
+/**
+ * Options for {@link emitBindDirectiveBody} — the root-agnostic emission of a
+ * single `bind:*` directive's wiring body.
+ *
+ * Family-A convergence (HALF 1, 2026-06-23). The bind:* lowering was previously
+ * inlined inside {@link emitBindings} (the file-scope, top-level pass) and
+ * acquired its element via `document.querySelector` and subscribed via a bare
+ * file-scope `_scrml_effect(...)`. That pass walks `collectMarkupNodes`, which
+ * never descends into `<match>` arm / `<engine>` state-child bodies — so a
+ * `bind:value=@cell` on an input inside an arm body emitted the
+ * `data-scrml-bind-value` placeholder but NO wiring (silent typed-input loss,
+ * `g-bindvalue-wiring-dropped-in-match-arm`, HIGH).
+ *
+ * This helper factors the per-flavour body out so BOTH the file-scope path
+ * (default options → byte-identical output) AND the per-arm wire function
+ * (`emit-variant-guard.ts:emitArmWireFunction`, `_root`-rooted acquire +
+ * `_disposers` sink) can share one lowering. Mirrors the
+ * {@link lowerClassDirectiveCondition} / {@link lowerAttrTemplateValue}
+ * convergence (S212 flogence Bug B) one tier up.
+ */
+export interface BindDirectiveBodyOpts {
+  /**
+   * Element-acquisition expression builder. Given the `[data-scrml-...]`
+   * selector, returns the JS expression that yields the DOM element.
+   *   - file-scope (default): `document.querySelector('${sel}')`
+   *   - arm wire fn:          `_root.querySelector('${sel}')`
+   */
+  acquire: (selector: string) => string;
+  /**
+   * Wrap a `_scrml_effect(...)` call site. The file-scope path emits the bare
+   * call (fire-and-forget, lives for the page lifetime); the arm path pushes
+   * the dispose handle onto `_disposers` so a variant change tears it down.
+   *   - file-scope (default): identity (returns `effectCall` unchanged)
+   *   - arm wire fn:          `_disposers.push(${effectCall})`
+   */
+  wrapEffect: (effectCall: string) => string;
+  /** enum var → enum type name (bind:value <select> coercion, §14.4.1 / §5.4). */
+  enumVarMap: Map<string, string>;
+  /** reactive var → typeAnnotation (bind:value predicate write-gating, §53.7.2). */
+  reactiveTypeMap: Map<string, string>;
+  /** encoding context for per-field `touched` storage-key encoding (§55.7). */
+  encodingCtx: EncodingContext | null | undefined;
+  /**
+   * Optional placeholder-id override for the `data-scrml-bind-*` selector. The
+   * file-scope path leaves this undefined and the helper derives the selector
+   * from `bAttr._bindId`. The per-arm path passes the per-render `bindId` it
+   * captured at registration time (the engine renders a state-child body more
+   * than once, each minting a fresh id; `_bindId` is sticky from the first
+   * render and would diverge from this binding's own arm-render HTML).
+   */
+  bindIdOverride?: string;
+}
+
+/**
+ * Emit the wiring body for a single `bind:*` directive on `mkNode`, returning
+ * the JS lines (including the leading `// bind:...` comment and the wrapping
+ * `{ ... }` block). Pure with respect to `lines` — returns a fresh array.
+ *
+ * Preserves every bind:value special case from the original inline lowering:
+ *   - enum-`<select>` coercion via `<Enum>_toEnum[event.target.value]`
+ *   - numeric-input coercion (`Number(event.target.value)`) for type=number/range
+ *   - §53.7.2 predicated-type write-gating (validate before reactive-set)
+ *   - the `_flatBindKey` dotted-path branch (formFor synth-bind flat storage key)
+ *   - per-field `touched` listener wiring for compound (dotted) paths
+ *
+ * Element acquisition + effect-disposal are parameterized via {@link BindDirectiveBodyOpts}
+ * so the file-scope and per-arm callers share this one lowering. With the
+ * DEFAULT options (`acquire` = `document.querySelector`, `wrapEffect` = identity)
+ * the output is byte-identical to the pre-extraction inline emission.
+ *
+ * Returns `[]` when `bAttr` is not a recognized `bind:*` directive whose RHS is
+ * a `variable-ref` (the caller's guard already filters, but be defensive).
+ */
+export function emitBindDirectiveBody(
+  bAttr: Attr,
+  mkNode: ASTNode,
+  opts: BindDirectiveBodyOpts,
+): string[] {
+  const lines: string[] = [];
+  if (!bAttr || !bAttr.name || !bAttr.name.startsWith("bind:")) return lines;
+  if (!bAttr.value || bAttr.value.kind !== "variable-ref") return lines;
+
+  const { acquire, wrapEffect, enumVarMap, reactiveTypeMap, encodingCtx, bindIdOverride } = opts;
+
+  const bVarRaw = (bAttr.value.name ?? "").replace(/^@/, ""); // e.g. "name" or "form.email"
+  const bElemId = genVar(`bind_elem_${(mkNode.tag as string) ?? "el"}`);
+  const bindDataAttr = `data-scrml-${bAttr.name.replace(":", "-")}`;
+  // The per-arm caller pins the placeholder id it captured at registration time
+  // (engine bodies render more than once; `_bindId` is sticky from the first
+  // render and would point at a stale id). The file-scope caller leaves it
+  // undefined and falls back to `_bindId` → byte-identical to the prior emission.
+  const _bindIdForSelector = bindIdOverride ?? bAttr._bindId;
+  const bindSelector = _bindIdForSelector
+    ? `[${bindDataAttr}="${_bindIdForSelector}"]`
+    : `[${bindDataAttr}]`;
+
+  // Decompose dotted path: "form.email.field" → rootKey="form", pathSegs=["email","field"]
+  //
+  // Bug 58 (S140): `_flatBindKey` (set by formFor's synth bind) forces the
+  // ENTIRE dotted name to be treated as a single flat storage key.
+  const _flatBindKey = (bAttr.value as { _flatBindKey?: boolean })._flatBindKey === true;
+  const dotIndex = bVarRaw.indexOf(".");
+  const isPath = _flatBindKey ? false : dotIndex !== -1;
+  const rootKey = isPath ? bVarRaw.slice(0, dotIndex) : bVarRaw;
+  const pathSegs = isPath ? bVarRaw.slice(dotIndex + 1).split(".") : [];
+
+  const readExpr = isPath
+    ? `_scrml_reactive_get(${JSON.stringify(rootKey)})${pathSegs.map(s => `.${s}`).join("")}`
+    : `_scrml_reactive_get(${JSON.stringify(rootKey)})`;
+
+  const writeExpr = (newValExpr: string): string => isPath
+    ? `_scrml_reactive_set(${JSON.stringify(rootKey)}, _scrml_deep_set(_scrml_reactive_get(${JSON.stringify(rootKey)}), ${JSON.stringify(pathSegs)}, ${newValExpr}))`
+    : `_scrml_reactive_set(${JSON.stringify(rootKey)}, ${newValExpr})`;
+
+  const elemExpr = acquire(bindSelector);
+
+  if (bAttr.name === "bind:value") {
+    // SPEC §5.4: <select> uses "change" event; all other elements use "input"
+    const elementTag = (mkNode.tag as string) ?? "";
+    const inputEvent = elementTag === "select" ? "change" : "input";
+
+    // §5.4 / §14.4.1: enum-typed @var on a <select> auto-coerces via <Enum>_toEnum.
+    const enumTypeName = elementTag === "select" ? enumVarMap.get(rootKey) : undefined;
+    // §5.4: Auto-coerce to number for type="number" and type="range" inputs
+    const inputType = (mkNode.attributes ?? mkNode.attrs ?? []).find(
+      (a: any) => a && a.name === "type" && a.value?.value
+    )?.value?.value ?? "";
+    const isNumericInput = inputType === "number" || inputType === "range";
+    const writeValue = enumTypeName
+      ? `(${enumTypeName}_toEnum[event.target.value] ?? event.target.value)`
+      : isNumericInput ? "Number(event.target.value)" : "event.target.value";
+
+    // §53.7.2: predicated-type write-gating.
+    const _bvTypeAnnotation = reactiveTypeMap.get(rootKey);
+    const _bvPredInfo = _bvTypeAnnotation ? parsePredicateAnnotation(_bvTypeAnnotation) : null;
+
+    lines.push(`// bind:value=@${bVarRaw}`);
+    lines.push(`{`);
+    lines.push(`  const ${bElemId} = ${elemExpr};`);
+    lines.push(`  if (${bElemId}) {`);
+    lines.push(`    ${bElemId}.value = ${readExpr};`);
+    if (_bvPredInfo) {
+      const _bvCheckExpr = predicateToJsExpr(_bvPredInfo.predicate, "event.target.value");
+      lines.push(`    ${bElemId}.addEventListener(${JSON.stringify(inputEvent)}, (event) => {`);
+      lines.push(`      // §53.7.2 runtime predicate check before reactive assignment`);
+      lines.push(`      if (${_bvCheckExpr}) { ${writeExpr(writeValue)}; }`);
+      lines.push(`    });`);
+    } else {
+      lines.push(`    ${bElemId}.addEventListener(${JSON.stringify(inputEvent)}, (event) => ${writeExpr(writeValue)});`);
+    }
+    lines.push(`    ${wrapEffect(`_scrml_effect(() => { ${bElemId}.value = ${readExpr}; })`)};`);
+    _emitTouchedListenerLines(lines, bVarRaw, bElemId, inputEvent, encodingCtx);
+    lines.push(`  }`);
+    lines.push(`}`);
+  } else if (bAttr.name === "bind:valueAsNumber") {
+    // SPEC §5.4 M-3: bind:valueAsNumber coerces event.target.value to Number.
+    const elementTag = (mkNode.tag as string) ?? "";
+    const inputEvent = elementTag === "select" ? "change" : "input";
+    lines.push(`// bind:valueAsNumber=@${bVarRaw}`);
+    lines.push(`{`);
+    lines.push(`  const ${bElemId} = ${elemExpr};`);
+    lines.push(`  if (${bElemId}) {`);
+    lines.push(`    ${bElemId}.value = ${readExpr};`);
+    lines.push(`    ${bElemId}.addEventListener(${JSON.stringify(inputEvent)}, (event) => ${writeExpr("Number(event.target.value)")});`);
+    lines.push(`    ${wrapEffect(`_scrml_effect(() => { ${bElemId}.value = ${readExpr}; })`)};`);
+    _emitTouchedListenerLines(lines, bVarRaw, bElemId, inputEvent, encodingCtx);
+    lines.push(`  }`);
+    lines.push(`}`);
+  } else if (bAttr.name === "bind:checked") {
+    lines.push(`// bind:checked=@${bVarRaw}`);
+    lines.push(`{`);
+    lines.push(`  const ${bElemId} = ${elemExpr};`);
+    lines.push(`  if (${bElemId}) {`);
+    lines.push(`    ${bElemId}.checked = ${readExpr};`);
+    lines.push(`    ${bElemId}.addEventListener("change", (event) => ${writeExpr("event.target.checked")});`);
+    lines.push(`    ${wrapEffect(`_scrml_effect(() => { ${bElemId}.checked = ${readExpr}; })`)};`);
+    _emitTouchedListenerLines(lines, bVarRaw, bElemId, "change", encodingCtx);
+    lines.push(`  }`);
+    lines.push(`}`);
+  } else if (bAttr.name === "bind:selected") {
+    lines.push(`// bind:selected=@${bVarRaw}`);
+    lines.push(`{`);
+    lines.push(`  const ${bElemId} = ${elemExpr};`);
+    lines.push(`  if (${bElemId}) {`);
+    lines.push(`    ${bElemId}.value = ${readExpr};`);
+    lines.push(`    ${bElemId}.addEventListener("change", (event) => ${writeExpr("event.target.value")});`);
+    lines.push(`    ${wrapEffect(`_scrml_effect(() => { ${bElemId}.value = ${readExpr}; })`)};`);
+    _emitTouchedListenerLines(lines, bVarRaw, bElemId, "change", encodingCtx);
+    lines.push(`  }`);
+    lines.push(`}`);
+  } else if (bAttr.name === "bind:files") {
+    lines.push(`// bind:files=@${bVarRaw}`);
+    lines.push(`{`);
+    lines.push(`  const ${bElemId} = ${elemExpr};`);
+    lines.push(`  if (${bElemId}) {`);
+    lines.push(`    ${bElemId}.addEventListener("change", (event) => ${writeExpr("event.target.files")});`);
+    lines.push(`    ${wrapEffect(`_scrml_effect(() => { /* files are read-only from DOM — effect tracks @${bVarRaw} */ ${readExpr}; })`)};`);
+    _emitTouchedListenerLines(lines, bVarRaw, bElemId, "change", encodingCtx);
+    lines.push(`  }`);
+    lines.push(`}`);
+  } else if (bAttr.name === "bind:group") {
+    lines.push(`// bind:group=@${bVarRaw}`);
+    lines.push(`{`);
+    lines.push(`  const ${bElemId} = ${elemExpr};`);
+    lines.push(`  if (${bElemId}) {`);
+    lines.push(`    ${bElemId}.checked = (${readExpr} === ${bElemId}.value);`);
+    lines.push(`    ${bElemId}.addEventListener("change", (event) => ${writeExpr("event.target.value")});`);
+    lines.push(`    ${wrapEffect(`_scrml_effect(() => { ${bElemId}.checked = (${readExpr} === ${bElemId}.value); })`)};`);
+    _emitTouchedListenerLines(lines, bVarRaw, bElemId, "change", encodingCtx);
+    lines.push(`  }`);
+    lines.push(`}`);
+  }
+  return lines;
+}
+
 export function emitBindings(ctx: CompileContext): string[] {
   const { fileAST, encodingCtx } = ctx;
   const lines: string[] = [];
@@ -448,147 +663,19 @@ export function emitBindings(ctx: CompileContext): string[] {
 
       // bind: directives — two-way binding
       if (bAttr.name.startsWith("bind:") && bAttr.value && bAttr.value.kind === "variable-ref") {
-        const bVarRaw = (bAttr.value.name ?? "").replace(/^@/, ""); // e.g. "name" or "form.email"
-        const bElemId = genVar(`bind_elem_${(mkNode.tag as string) ?? "el"}`);
-        const bindDataAttr = `data-scrml-${bAttr.name.replace(":", "-")}`;
-        const bindSelector = bAttr._bindId
-          ? `[${bindDataAttr}="${bAttr._bindId}"]`
-          : `[${bindDataAttr}]`;
-
-        // Decompose dotted path: "form.email.field" → rootKey="form", pathSegs=["email","field"]
-        //
-        // Bug 58 (S140): `_flatBindKey` (set by formFor's synth bind) forces the
-        // ENTIRE dotted name to be treated as a single flat storage key. The §55
-        // validity surface stores per-field state under the dotted key
-        // ("signup.name") with the compound parent ("signup") as a DERIVED proxy
-        // reading those flat cells. A deep-set on the derived parent is a no-op,
-        // so the write MUST target "signup.name" directly. With the flag,
-        // isPath=false and rootKey is the full name → direct read/write.
-        const _flatBindKey = (bAttr.value as { _flatBindKey?: boolean })._flatBindKey === true;
-        const dotIndex = bVarRaw.indexOf(".");
-        const isPath = _flatBindKey ? false : dotIndex !== -1;
-        const rootKey = isPath ? bVarRaw.slice(0, dotIndex) : bVarRaw;
-        const pathSegs = isPath ? bVarRaw.slice(dotIndex + 1).split(".") : [];
-
-        // Build JS expressions for read, write, and subscribe projection.
-        //
-        // Simple (@var):
-        //   read:    _scrml_reactive_get("var")
-        //   write:   _scrml_reactive_set("var", newVal)
-        //   proj:    _scrml_v  (the full reactive value)
-        //
-        // Path (@obj.a.b):
-        //   read:    _scrml_reactive_get("obj").a.b
-        //   write:   _scrml_reactive_set("obj", _scrml_deep_set(_scrml_reactive_get("obj"), ["a","b"], newVal))
-        //   sub key: "obj"  (subscribe to root; project path in callback)
-        //   proj:    _scrml_v?.a?.b
-        const readExpr = isPath
-          ? `_scrml_reactive_get(${JSON.stringify(rootKey)})${pathSegs.map(s => `.${s}`).join("")}`
-          : `_scrml_reactive_get(${JSON.stringify(rootKey)})`;
-
-        const writeExpr = (newValExpr: string): string => isPath
-          ? `_scrml_reactive_set(${JSON.stringify(rootKey)}, _scrml_deep_set(_scrml_reactive_get(${JSON.stringify(rootKey)}), ${JSON.stringify(pathSegs)}, ${newValExpr}))`
-          : `_scrml_reactive_set(${JSON.stringify(rootKey)}, ${newValExpr})`;
-
-        if (bAttr.name === "bind:value") {
-          // SPEC §5.4: <select> uses "change" event; all other elements use "input"
-          const elementTag = (mkNode.tag as string) ?? "";
-          const inputEvent = elementTag === "select" ? "change" : "input";
-
-          // §5.4 / §14.4.1: When the bound @var is enum-typed and the element is a <select>,
-          // auto-coerce the string from event.target.value back to the enum variant via the
-          // compiler-generated lookup table (e.g. Theme_toEnum[event.target.value]).
-          // Falls back to the raw string value if no matching variant (defensive).
-          const enumTypeName = elementTag === "select" ? enumVarMap.get(rootKey) : undefined;
-          // §5.4: Auto-coerce to number for type="number" and type="range" inputs
-          const inputType = (mkNode.attributes ?? mkNode.attrs ?? []).find(
-            (a: any) => a && a.name === "type" && a.value?.value
-          )?.value?.value ?? "";
-          const isNumericInput = inputType === "number" || inputType === "range";
-          const writeValue = enumTypeName
-            ? `(${enumTypeName}_toEnum[event.target.value] ?? event.target.value)`
-            : isNumericInput ? "Number(event.target.value)" : "event.target.value";
-
-          // §53.7.2: Check if bound var has a predicated type — if so, gate the write.
-          const _bvTypeAnnotation = reactiveTypeMap.get(rootKey);
-          const _bvPredInfo = _bvTypeAnnotation ? parsePredicateAnnotation(_bvTypeAnnotation) : null;
-
-          lines.push(`// bind:value=@${bVarRaw}`);
-          lines.push(`{`);
-          lines.push(`  const ${bElemId} = document.querySelector('${bindSelector}');`);
-          lines.push(`  if (${bElemId}) {`);
-          lines.push(`    ${bElemId}.value = ${readExpr};`);
-          if (_bvPredInfo) {
-            // Emit a guarded event listener: validate before writing (§53.7.2)
-            const _bvCheckExpr = predicateToJsExpr(_bvPredInfo.predicate, "event.target.value");
-            lines.push(`    ${bElemId}.addEventListener(${JSON.stringify(inputEvent)}, (event) => {`);
-            lines.push(`      // §53.7.2 runtime predicate check before reactive assignment`);
-            lines.push(`      if (${_bvCheckExpr}) { ${writeExpr(writeValue)}; }`);
-            lines.push(`    });`);
-          } else {
-            lines.push(`    ${bElemId}.addEventListener(${JSON.stringify(inputEvent)}, (event) => ${writeExpr(writeValue)});`);
-          }
-          lines.push(`    _scrml_effect(() => { ${bElemId}.value = ${readExpr}; });`);
-          _emitTouchedListenerLines(lines, bVarRaw, bElemId, inputEvent, encodingCtx);
-          lines.push(`  }`);
-          lines.push(`}`);
-        } else if (bAttr.name === "bind:valueAsNumber") {
-          // SPEC §5.4 M-3: bind:valueAsNumber coerces event.target.value to Number.
-          const elementTag = (mkNode.tag as string) ?? "";
-          const inputEvent = elementTag === "select" ? "change" : "input";
-          lines.push(`// bind:valueAsNumber=@${bVarRaw}`);
-          lines.push(`{`);
-          lines.push(`  const ${bElemId} = document.querySelector('${bindSelector}');`);
-          lines.push(`  if (${bElemId}) {`);
-          lines.push(`    ${bElemId}.value = ${readExpr};`);
-          lines.push(`    ${bElemId}.addEventListener(${JSON.stringify(inputEvent)}, (event) => ${writeExpr("Number(event.target.value)")});`);
-          lines.push(`    _scrml_effect(() => { ${bElemId}.value = ${readExpr}; });`);
-          _emitTouchedListenerLines(lines, bVarRaw, bElemId, inputEvent, encodingCtx);
-          lines.push(`  }`);
-          lines.push(`}`);
-        } else if (bAttr.name === "bind:checked") {
-          lines.push(`// bind:checked=@${bVarRaw}`);
-          lines.push(`{`);
-          lines.push(`  const ${bElemId} = document.querySelector('${bindSelector}');`);
-          lines.push(`  if (${bElemId}) {`);
-          lines.push(`    ${bElemId}.checked = ${readExpr};`);
-          lines.push(`    ${bElemId}.addEventListener("change", (event) => ${writeExpr("event.target.checked")});`);
-          lines.push(`    _scrml_effect(() => { ${bElemId}.checked = ${readExpr}; });`);
-          _emitTouchedListenerLines(lines, bVarRaw, bElemId, "change", encodingCtx);
-          lines.push(`  }`);
-          lines.push(`}`);
-        } else if (bAttr.name === "bind:selected") {
-          lines.push(`// bind:selected=@${bVarRaw}`);
-          lines.push(`{`);
-          lines.push(`  const ${bElemId} = document.querySelector('${bindSelector}');`);
-          lines.push(`  if (${bElemId}) {`);
-          lines.push(`    ${bElemId}.value = ${readExpr};`);
-          lines.push(`    ${bElemId}.addEventListener("change", (event) => ${writeExpr("event.target.value")});`);
-          lines.push(`    _scrml_effect(() => { ${bElemId}.value = ${readExpr}; });`);
-          _emitTouchedListenerLines(lines, bVarRaw, bElemId, "change", encodingCtx);
-          lines.push(`  }`);
-          lines.push(`}`);
-        } else if (bAttr.name === "bind:files") {
-          lines.push(`// bind:files=@${bVarRaw}`);
-          lines.push(`{`);
-          lines.push(`  const ${bElemId} = document.querySelector('${bindSelector}');`);
-          lines.push(`  if (${bElemId}) {`);
-          lines.push(`    ${bElemId}.addEventListener("change", (event) => ${writeExpr("event.target.files")});`);
-          lines.push(`    _scrml_effect(() => { /* files are read-only from DOM — effect tracks @${bVarRaw} */ ${readExpr}; });`);
-          _emitTouchedListenerLines(lines, bVarRaw, bElemId, "change", encodingCtx);
-          lines.push(`  }`);
-          lines.push(`}`);
-        } else if (bAttr.name === "bind:group") {
-          lines.push(`// bind:group=@${bVarRaw}`);
-          lines.push(`{`);
-          lines.push(`  const ${bElemId} = document.querySelector('${bindSelector}');`);
-          lines.push(`  if (${bElemId}) {`);
-          lines.push(`    ${bElemId}.checked = (${readExpr} === ${bElemId}.value);`);
-          lines.push(`    ${bElemId}.addEventListener("change", (event) => ${writeExpr("event.target.value")});`);
-          lines.push(`    _scrml_effect(() => { ${bElemId}.checked = (${readExpr} === ${bElemId}.value); });`);
-          _emitTouchedListenerLines(lines, bVarRaw, bElemId, "change", encodingCtx);
-          lines.push(`  }`);
-          lines.push(`}`);
+        // Family-A convergence (HALF 1): the per-flavour bind:* lowering lives in
+        // the root-agnostic `emitBindDirectiveBody` helper so the file-scope path
+        // (here) and the per-arm wire fn (emit-variant-guard.ts) share it. DEFAULT
+        // options (document.querySelector acquire + bare file-scope `_scrml_effect`)
+        // reproduce the pre-extraction emission byte-for-byte.
+        for (const _bindLine of emitBindDirectiveBody(bAttr, mkNode, {
+          acquire: (sel) => `document.querySelector('${sel}')`,
+          wrapEffect: (effectCall) => effectCall,
+          enumVarMap,
+          reactiveTypeMap,
+          encodingCtx,
+        })) {
+          lines.push(_bindLine);
         }
         lines.push("");
       }

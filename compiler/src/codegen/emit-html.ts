@@ -1947,6 +1947,38 @@ export function generateHtml(
           const bindId = genVar(`bind_${name.replace(":", "_")}`);
           parts.push(` data-scrml-${name.replace(":", "-")}="${bindId}"`);
           if (!attr._bindId) attr._bindId = bindId;
+          // Family-A convergence (HALF 1) — when this bind: directive sits inside
+          // a `<match>` arm / `<engine>` state-child body, the top-level
+          // emit-bindings.ts pass (which walks collectMarkupNodes) never reaches
+          // it, so the `querySelector + addEventListener + _scrml_effect` wiring is
+          // never emitted (typed input silently dropped:
+          // g-bindvalue-wiring-dropped-in-match-arm, HIGH). Register an arm-tagged
+          // bind-directive binding so emit-variant-guard.ts:emitArmWireFunction
+          // re-emits the bind wiring per-mount against the arm `_root` via the
+          // shared emitBindDirectiveBody helper. Mirrors the S212 class:/attr-tpl
+          // registration just below. The top-level path is unchanged (it walks the
+          // markup AST directly; this binding is consumed ONLY by the arm wire fn).
+          if (
+            registry && registry.currentArmContext != null &&
+            attr.value && attr.value.kind === "variable-ref"
+          ) {
+            registry.addLogicBinding({
+              kind: "bind-directive",
+              bindAttr: attr,
+              bindNode: node,
+              // Capture the LOCAL bindId that was just emitted into the arm-body
+              // HTML (`parts.push`). The engine path renders a state-child body
+              // through generateHtml MORE THAN ONCE (static initial-mount HTML +
+              // the arm render fn), and each pass mints a fresh `genVar` bindId.
+              // `attr._bindId` is sticky from the FIRST render, so re-deriving the
+              // selector from it in emitArmWireFunction would point at a DIFFERENT
+              // id than the one in the HTML this binding was registered alongside.
+              // Pinning the per-render `bindId` here keeps the wire fn's selector
+              // in lockstep with its own arm-render HTML (mirrors how the S212
+              // class:/attr-tpl path captures `directiveSelector` at reg time).
+              bindIdForArm: bindId,
+            });
+          }
           continue;
         }
 

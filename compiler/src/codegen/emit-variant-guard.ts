@@ -59,6 +59,12 @@
  *   - Non-delegable event handlers (focus, blur, mouseenter, mouseleave,
  *     change, input, scroll, ...) emitted via `addEventListener` within
  *     the new arm's mount subtree.
+ *   - `bind:value` / `bind:valueAsNumber` / `bind:checked` / `bind:selected` /
+ *     `bind:files` / `bind:group` two-way binding (Family-A convergence HALF 1,
+ *     2026-06-23) — lowered via the shared `emitBindDirectiveBody`
+ *     (emit-bindings.ts) with a `_root`-rooted acquire + a `_disposers` effect
+ *     sink. Fixes `g-bindvalue-wiring-dropped-in-match-arm` (HIGH) for BOTH
+ *     `<match>` arm bodies and `<engine>` state-child bodies.
  *
  * **Out-of-scope (post-MVP follow-on)** — these reactive surfaces inside
  * arm bodies share the same module-init binding pattern but are NOT
@@ -69,7 +75,6 @@
  *   - if-chain branches inside arm bodies
  *   - mount-toggle `if=` (clean-subtree path)
  *   - transitions (`transition:`, `in:`, `out:`)
- *   - `bind:value` / `bind:checked` / `bind:files` / `bind:group`
  *   - `<timer>` / `<poll>` lifecycle elements
  *   - `<request>` server-fn wiring
  *   - `<keyboard>` / `<mouse>` / `<gamepad>` input-state elements
@@ -447,6 +452,24 @@ function emitArmWireFunction(
            typeof b.directiveJsExpr === "string",
   );
 
+  // Family-A convergence (HALF 1) — bind:* directives tagged with THIS arm
+  // context (emit-html.ts registered them when it emitted the
+  // `data-scrml-bind-*` placeholder inside the arm body). Same drop-class as
+  // the class:/attr-tpl directives above: the top-level emit-bindings.ts pass
+  // never reaches arm bodies, so a `bind:value=@cell` on an arm-body input was
+  // a dead placeholder (typed input silently dropped,
+  // g-bindvalue-wiring-dropped-in-match-arm, HIGH). Each binding carries the
+  // raw bind: attr + markup node; the loop below feeds them to the SHARED
+  // emitBindDirectiveBody lowering (emit-bindings.ts) with a `_root`-rooted
+  // acquire + a `_disposers` effect sink, so the runtime shape matches the
+  // outside-arm wiring exactly (only the element lookup + effect-disposal
+  // differ). This fixes the HIGH for `<match>` arms AND `<engine>` state-child
+  // bodies simultaneously (both route through this variant-source-agnostic
+  // helper via emitVariantGuardedRender).
+  const wireableBinds = logicBindings.filter(
+    (b) => b.kind === "bind-directive" && b.bindAttr != null && b.bindNode != null,
+  );
+
   // B1 (§51.0.B.1) — payload bindings as wire-fn parameters. The dispatcher
   // passes `_data[fieldName]` positionals after `_root`, matching the
   // render-fn signature shape. Bindings are then in scope throughout the
@@ -460,7 +483,8 @@ function emitArmWireFunction(
   // No bindings to wire → no-op shell so the dispatcher branch stays uniform.
   if (
     wireableLogic.length === 0 && wireableEvents.length === 0 &&
-    wireableRenders.length === 0 && wireableDirectives.length === 0
+    wireableRenders.length === 0 && wireableDirectives.length === 0 &&
+    wireableBinds.length === 0
   ) {
     return `function ${wireFnName}(${wireParams}) { return function() {}; }`;
   }
@@ -570,6 +594,46 @@ function emitArmWireFunction(
     }
     lines.push(`    }`);
     lines.push(`  }`);
+  }
+
+  // ---- bind:* directives: querySelector + listener + _scrml_effect ----
+  // Family-A convergence (HALF 1). The bind:* lowering is shared with the
+  // top-level emit-bindings.ts path via emitBindDirectiveBody — only the element
+  // acquire (`_root.querySelector` vs `document.querySelector`) and the effect
+  // disposal (`_disposers.push(_scrml_effect(...))` vs a bare file-scope effect)
+  // differ. The file-level enum/type maps the helper needs are rebuilt here from
+  // ctx.fileAST (cheap; once per arm wire fn). The `_scrml_effect` handle is
+  // pushed onto `_disposers` so a subsequent variant change tears the
+  // subscription down (the arm subtree is replaced via innerHTML — its cached
+  // element handle goes stale, so the prior effect must stop firing). This is the
+  // exact disposal contract the class:/attr-tpl loop above uses.
+  if (wireableBinds.length > 0) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { emitBindDirectiveBody, buildEnumVarMap, buildReactiveTypeMap } =
+      require("./emit-bindings.ts") as {
+        emitBindDirectiveBody: (bAttr: any, mkNode: any, opts: any) => string[];
+        buildEnumVarMap: (fileAST: any) => Map<string, string>;
+        buildReactiveTypeMap: (fileAST: any) => Map<string, string>;
+      };
+    const _armEnumVarMap = buildEnumVarMap(ctx.fileAST);
+    const _armReactiveTypeMap = buildReactiveTypeMap(ctx.fileAST);
+    for (const binding of wireableBinds) {
+      const bodyLines = emitBindDirectiveBody(binding.bindAttr, binding.bindNode, {
+        // `_root`-rooted acquire: the arm subtree is mounted under `_root`, so
+        // the bind placeholder lives inside it (NOT the document at large).
+        acquire: (sel: string) => `_root.querySelector('${sel}')`,
+        // Disposal sink: push the effect handle onto `_disposers` so the
+        // variant-change teardown stops the stale-element subscription.
+        wrapEffect: (effectCall: string) => `_disposers.push(${effectCall})`,
+        enumVarMap: _armEnumVarMap,
+        reactiveTypeMap: _armReactiveTypeMap,
+        encodingCtx: ctx.encodingCtx,
+        // Pin the placeholder id captured at registration time (lockstep with
+        // THIS arm-render's HTML, even when the engine re-renders the body).
+        bindIdOverride: typeof binding.bindIdForArm === "string" ? binding.bindIdForArm : undefined,
+      });
+      for (const bl of bodyLines) lines.push(`  ${bl}`);
+    }
   }
 
   // ---- Event bindings: addEventListener + remover dispose ----
