@@ -1,0 +1,10 @@
+// Const-only module — NO functions, NO ?{} SQL, NO channels.
+// A server-side consumer (app.scrml) imports MAX_ROWS by-name into a ?{} SQL
+// read, so the server bundle emits `import { MAX_ROWS } from './config.server.js'`.
+// Before the fix: config.scrml short-circuits to "" (no .server.js) →
+// W-SERVER-IMPORT-UNEMITTED (MISSING-FILE) + runtime "Cannot find module".
+
+${
+    export const MAX_ROWS = 100
+    export const DB_PATH = "./repro.db"
+}

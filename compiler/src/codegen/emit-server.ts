@@ -22,6 +22,66 @@ import { parseExprToNode } from "../expression-parser.ts";
 // prune pass is somehow skipped (it is a bare comment line).
 const LOCAL_SERVER_IMPORT_SENTINEL = "// __SCRML_LOCAL_SERVER_IMPORTS__";
 
+// GITI-012 / fix-server-eq-helper-import: structural-equality helper source.
+// SPEC §45 emits `_scrml_structural_eq(a, b)` for any `==`/`!=` whose operands
+// aren't statically primitive (see emit-expr.ts). The helper lives in the
+// client runtime; .server.js never imports it. If any callsite survived the
+// primitive shortcut, this is inlined at the top of the server module so the
+// reference resolves at runtime. Extracted to a module constant so BOTH the
+// route-handler path (generateServerJs) and the value-only path
+// (generateValueOnlyServerJs, g-const-only-module-no-server-emit) inline the
+// IDENTICAL helper — no drift.
+const SERVER_STRUCTURAL_EQ_HELPER = [
+  "",
+  "// --- §45 Structural equality helper (inlined for server, no client runtime here) ---",
+  "function _scrml_structural_eq(a, b) {",
+  "  if (a === b) return true;",
+  "  if (a === null || b === null || a === undefined || b === undefined) return false;",
+  "  if (typeof a !== typeof b) return false;",
+  "  if (typeof a !== \"object\") return a === b;",
+  "  if (Array.isArray(a)) {",
+  "    if (!Array.isArray(b) || a.length !== b.length) return false;",
+  "    for (let i = 0; i < a.length; i++) {",
+  "      if (!_scrml_structural_eq(a[i], b[i])) return false;",
+  "    }",
+  "    return true;",
+  "  }",
+  // Enum-variant check: `_tag` is a discriminator string set by the
+  // emitter. `!= null` (loose) covers both null + undefined absence,
+  // avoiding the bare `undefined` keyword (W-CG-UNDEFINED-INTERPOLATION).
+  "  if (a._tag != null && b._tag != null) {",
+  "    if (a._tag !== b._tag) return false;",
+  "    const aKeys = Object.keys(a);",
+  "    const bKeys = Object.keys(b);",
+  "    if (aKeys.length !== bKeys.length) return false;",
+  "    for (const key of aKeys) {",
+  "      if (key === \"_tag\") continue;",
+  "      if (!_scrml_structural_eq(a[key], b[key])) return false;",
+  "    }",
+  "    return true;",
+  "  }",
+  "  const aKeys = Object.keys(a);",
+  "  const bKeys = Object.keys(b);",
+  "  if (aKeys.length !== bKeys.length) return false;",
+  "  for (const key of aKeys) {",
+  "    if (!Object.prototype.hasOwnProperty.call(b, key)) return false;",
+  "    if (!_scrml_structural_eq(a[key], b[key])) return false;",
+  "  }",
+  "  return true;",
+  "}",
+  "",
+].join("\n");
+
+// Inject `helper` after the file header + imports block (the first blank-line
+// boundary) so a hoisted helper sits above every reference. Shared by the
+// post-emit helper-inline scans (structural-eq / wire / log). Mirrors the
+// in-place `headerEndIdx` logic the route-handler path uses.
+function injectAfterHeader(emitted: string, helper: string): string {
+  const headerEndIdx = emitted.indexOf("\n\n");
+  if (headerEndIdx === -1) return helper + emitted;
+  return emitted.slice(0, headerEndIdx) + helper + emitted.slice(headerEndIdx);
+}
+
 // g-pure-module-server-emit (S207): conservative identifier-reference check.
 // Returns true if `name` appears in `body` as a standalone identifier token
 // (word-boundary, not a substring of a longer identifier). Used to decide
@@ -589,6 +649,84 @@ function emitModuleValueExportLines(
   }
   out.push("");
   return out;
+}
+
+/**
+ * g-const-only-module-no-server-emit (sPA ss1 item 2) — emit a MINIMAL,
+ * value-only `.server.js` for a module that has NO server content (no server
+ * fns / no `?{}` / no channels / no auth-middleware / etc.) but DOES export
+ * runtime VALUE bindings (constants + pure functions) that a sibling SERVER
+ * bundle imports by-name.
+ *
+ * BACKGROUND. `generateServerJs` short-circuits to `""` when a module has no
+ * server content (no route handlers to emit). A const-only module therefore
+ * emits no `.server.js`. But if a server-side consumer imports one of its
+ * VALUE consts by-name (`import { MAX_ROWS } from './config.scrml'`), the
+ * consumer's `.server.js` emits `import { MAX_ROWS } from './config.server.js'`
+ * — pointing at a file that was never written → `Cannot find module` at
+ * runtime (a GREEN compile; warned via W-SERVER-IMPORT-UNEMITTED MISSING-FILE).
+ *
+ * This is the SIBLING residual to the S208 fix: that fix made the route-handler
+ * path emit a module's value exports ALONGSIDE its routes (the MISSING-EXPORT
+ * branch); this fixes the case where there ARE no routes at all (the
+ * MISSING-FILE branch). The orchestration layer (api.js) calls this ONLY for a
+ * module that is actually server-imported-by-name (it has the cross-file
+ * "who imports `./X.server.js`" knowledge), so client-only const modules are
+ * NOT force-emitted (no dead `.server.js` churn).
+ *
+ * WHAT IS EMITTED. Reuses `emitModuleValueExportLines` — the SAME value-export
+ * collector the route-handler path uses — so the correctness filters are
+ * identical: VALUE consts + pure exported functions only; type exports,
+ * markup-component consts, `?{}`-init consts, and server-OPERATION functions are
+ * all SKIPPED. Returns `""` when the module has no emittable value export (the
+ * caller then leaves the dangling import unresolved — the warning still fires,
+ * which is correct: there is genuinely nothing to import).
+ *
+ * Helper inlining: a lowered value (a const `==` or a pure fn body) can emit
+ * `_scrml_structural_eq(` / `_scrml_log(` / `_scrml_wire_encode(`. We run the
+ * SAME post-emit helper-inline scans the route-handler path runs (shared helper
+ * sources), so the emitted file `node --check`s clean and self-resolves with no
+ * client-runtime import. A value export can never introduce `_scrml_sql`
+ * (`?{}`-using consts/fns are filtered out) or idempotency calls (route-only),
+ * so those two inliners are intentionally not run here.
+ *
+ * The var-counter is snapshotted + restored so mangled `_scrml_*_<N>` suffixes
+ * in OTHER files don't shift (mirrors the route-handler call site).
+ */
+export function generateValueOnlyServerJs(fileAST: any): string {
+  const filePath: string = fileAST.filePath;
+
+  // Build the minimal file header (mirrors generateServerJs's first lines so
+  // the `injectAfterHeader` `\n\n` boundary exists for hoisting helpers).
+  const lines: string[] = [];
+  lines.push("// Generated server value exports (compiler IR — not for direct consumption).");
+  lines.push("// g-const-only-module-no-server-emit: this module has no server content but");
+  lines.push("// exports runtime VALUE bindings a sibling server bundle imports by-name.");
+  lines.push("");
+
+  // Collect the value-export lines (consts + pure fns) via the shared collector.
+  // The var-counter is snapshotted/restored so no other file's mangling shifts.
+  const _veSnapshot = getVarCounter();
+  const veLines = emitModuleValueExportLines(fileAST, filePath, lines.join("\n"));
+  setVarCounter(_veSnapshot);
+  if (veLines.length === 0) return ""; // nothing server-importable → emit nothing.
+  for (const l of veLines) lines.push(l);
+
+  let emitted = lines.join("\n");
+
+  // Helper inlining — the SAME scans the route-handler path runs, for the
+  // helpers a value export can actually introduce (structural-eq / wire / log).
+  if (emitted.includes("_scrml_structural_eq(")) {
+    emitted = injectAfterHeader(emitted, SERVER_STRUCTURAL_EQ_HELPER);
+  }
+  if (emitted.includes("_scrml_wire_encode(")) {
+    emitted = injectAfterHeader(emitted, SERVER_WIRE_ENCODER_HELPER);
+  }
+  if (emitted.includes("_scrml_log(")) {
+    emitted = injectAfterHeader(emitted, SERVER_LOG_HELPER);
+  }
+
+  return emitted;
 }
 
 /**
@@ -2126,56 +2264,10 @@ export function generateServerJs(
   // primitive shortcut, inline the helper at the top of the server module so
   // the reference resolves at runtime.
   if (finalEmitted.includes("_scrml_structural_eq(")) {
-    const helper = [
-      "",
-      "// --- §45 Structural equality helper (inlined for server, no client runtime here) ---",
-      "function _scrml_structural_eq(a, b) {",
-      "  if (a === b) return true;",
-      "  if (a === null || b === null || a === undefined || b === undefined) return false;",
-      "  if (typeof a !== typeof b) return false;",
-      "  if (typeof a !== \"object\") return a === b;",
-      "  if (Array.isArray(a)) {",
-      "    if (!Array.isArray(b) || a.length !== b.length) return false;",
-      "    for (let i = 0; i < a.length; i++) {",
-      "      if (!_scrml_structural_eq(a[i], b[i])) return false;",
-      "    }",
-      "    return true;",
-      "  }",
-      // Enum-variant check: `_tag` is a discriminator string set by the
-      // emitter. `!= null` (loose) covers both null + undefined absence,
-      // avoiding the bare `undefined` keyword (W-CG-UNDEFINED-INTERPOLATION).
-      "  if (a._tag != null && b._tag != null) {",
-      "    if (a._tag !== b._tag) return false;",
-      "    const aKeys = Object.keys(a);",
-      "    const bKeys = Object.keys(b);",
-      "    if (aKeys.length !== bKeys.length) return false;",
-      "    for (const key of aKeys) {",
-      "      if (key === \"_tag\") continue;",
-      "      if (!_scrml_structural_eq(a[key], b[key])) return false;",
-      "    }",
-      "    return true;",
-      "  }",
-      "  const aKeys = Object.keys(a);",
-      "  const bKeys = Object.keys(b);",
-      "  if (aKeys.length !== bKeys.length) return false;",
-      "  for (const key of aKeys) {",
-      "    if (!Object.prototype.hasOwnProperty.call(b, key)) return false;",
-      "    if (!_scrml_structural_eq(a[key], b[key])) return false;",
-      "  }",
-      "  return true;",
-      "}",
-      "",
-    ].join("\n");
     // Inject AFTER the file header + imports block so the helper is hoisted
-    // above any function that might call it. The marker we insert at is the
-    // first blank line that follows the imports (which the emitter places at
-    // line 123-ish via \`lines.push("")\` after the import loop).
-    const headerEndIdx = finalEmitted.indexOf("\n\n");
-    if (headerEndIdx === -1) {
-      finalEmitted = helper + finalEmitted;
-    } else {
-      finalEmitted = finalEmitted.slice(0, headerEndIdx) + helper + finalEmitted.slice(headerEndIdx);
-    }
+    // above any function that might call it (the first blank line following
+    // the imports). Helper source is the shared SERVER_STRUCTURAL_EQ_HELPER.
+    finalEmitted = injectAfterHeader(finalEmitted, SERVER_STRUCTURAL_EQ_HELPER);
   }
 
   // M-7C-D-12 Track 2 (§57 Wire Format) — encoder helper post-emit detection.

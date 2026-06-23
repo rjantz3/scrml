@@ -1,0 +1,20 @@
+<db src="./repro.db" tables="items">
+
+    ${
+        import { MAX_ROWS } from './config.scrml'
+
+        // route-inferring server fn — its ?{} SQL read interpolates the imported
+        // const, so the server bundle emits `import { MAX_ROWS } from './config.server.js'`.
+        export function listItems() {
+            ?{`CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, name TEXT)`}.run()
+            const rows = ?{`SELECT id, name FROM items LIMIT ${MAX_ROWS}`}.all()
+            return rows
+        }
+    }
+
+</>
+
+<main>
+    <h1>Repro</h1>
+    <button onclick=${listItems()}>Load</button>
+</main>

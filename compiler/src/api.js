@@ -37,6 +37,7 @@ import { runAuthGraph } from "./auth-graph.ts";
 import { serializeChunksManifest } from "./codegen/route-splitter.ts";
 import { buildMcpDescriptors } from "./codegen/mcp-descriptors.ts";
 import { runCG } from "./code-generator.js";
+import { generateValueOnlyServerJs } from "./codegen/emit-server.ts";
 import { validateEmittedArtifacts } from "./codegen/validate-emit.ts";
 import { runMetaEval } from "./meta-eval.ts";
 import { resolveModules, resolveModulePath } from "./module-resolver.js";
@@ -2186,6 +2187,71 @@ export function compileScrml(options = {}) {
       }
     }
   }
+  // ---------------------------------------------------------------------------
+  // g-const-only-module-no-server-emit (sPA ss1 item 2) — on-import value-only
+  // .server.js emission. Sibling fix to the S208 route-handler value-export
+  // path: that closed the MISSING-EXPORT branch (a server-CALLED route-inferred
+  // helper that emits a route, not a value); THIS closes the MISSING-FILE branch
+  // (a const-only module that emits NO .server.js at all).
+  //
+  // A module whose exports are CONSTANTS / pure types only (no server fns / no
+  // `?{}` / no channels) short-circuits to "" in generateServerJs (emit-server)
+  // → no .server.js. But a server-side consumer that imports a VALUE const
+  // by-name emits `import { CONST } from './mod.server.js'` → the file does not
+  // exist → `Cannot find module` at runtime (warned MISSING-FILE below).
+  //
+  // RIGHT SCOPE (R3): emit the minimal value-only .server.js ONLY for a
+  // const-only module that is ACTUALLY server-imported by-name — NOT for every
+  // const-only module (that would emit dead .server.js files for client-only
+  // modules + churn every baseline). The cross-file "who imports ./X.server.js"
+  // knowledge lives HERE (same regex + source-path resolution
+  // checkServerImportInvariant uses), so this runs BEFORE it: resolve the
+  // dangling targets, emit their value-only .server.js, attach to the output;
+  // the invariant check then sees `target.serverJs` exists and the MISSING-FILE
+  // warning drops to 0. A module with NO server-importable value export emits
+  // nothing (generateValueOnlyServerJs returns "") — the warning correctly
+  // still fires (there is genuinely nothing to import).
+  // ---------------------------------------------------------------------------
+  function emitValueOnlyServerJsForDanglingImports() {
+    if (!cgResult.outputs) return;
+    // Index file ASTs + output objects by absolute source path so a resolved
+    // `./X.scrml` target can be located + run through generateValueOnlyServerJs.
+    const astByAbsSource = new Map();
+    for (const f of metaFiles) {
+      if (f && f.filePath) astByAbsSource.set(resolve(f.filePath), f);
+    }
+    const outputByAbsSource = new Map();
+    for (const [fp, out] of cgResult.outputs) outputByAbsSource.set(resolve(fp), out);
+    // `import D, { a, b as c } from "./X.server.js"` — same shape the invariant
+    // check matches. We only need the relative `.server.js` path here.
+    const importRe =
+      /\bimport\s+(?:[A-Za-z_$][\w$]*\s*,?\s*)?(?:\{[^}]*\})?\s*from\s*["'](\.\.?\/[^"']+\.server\.js)["']/g;
+    // Dedup so a target imported by many bundles is emitted once.
+    const emittedFor = new Set();
+    for (const [filePath, output] of cgResult.outputs) {
+      if (!output.serverJs) continue;
+      importRe.lastIndex = 0;
+      let m;
+      while ((m = importRe.exec(output.serverJs))) {
+        const relServer = m[1];
+        const relScrml = relServer.replace(/\.server\.js$/, ".scrml");
+        const targetAbs = resolve(dirname(filePath), relScrml);
+        if (emittedFor.has(targetAbs)) continue;
+        const target = outputByAbsSource.get(targetAbs);
+        if (!target) continue; // external / cross-unit / vendor — not ours.
+        if (target.serverJs) continue; // already has server content — fine.
+        const targetAst = astByAbsSource.get(targetAbs);
+        if (!targetAst) continue; // no AST for the target (shouldn't happen).
+        const valueOnly = generateValueOnlyServerJs(targetAst);
+        emittedFor.add(targetAbs);
+        if (!valueOnly) continue; // no server-importable value export → leave dangling (warning fires).
+        // Attach the minimal value-only .server.js to the target output so the
+        // parse-gate + write phase pick it up and the invariant check resolves.
+        target.serverJs = valueOnly;
+      }
+    }
+  }
+  emitValueOnlyServerJsForDanglingImports();
   checkServerImportInvariant();
 
   // ---------------------------------------------------------------------------

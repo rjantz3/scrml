@@ -15,10 +15,18 @@
  *       exported VALUE bindings (constants + pure fns) as native ESM exports
  *       ADDITIVELY, so a server-USED helper in an EMITTED `.server.js` no longer
  *       dangles. The MISSING-EXPORT branch consequently STOPS firing for that
- *       class (§1, §4 below assert the post-ss1 no-fire). The MISSING-FILE
- *       branch (a) still fires for a const-only module that emits NO `.server.js`
- *       at all (§3) — a separate gap (Option-1 force-emit was rejected by the
- *       sibling g-pure-module-server-emit fix; it link-errors on erased types).
+ *       class (§1 below asserts the post-ss1 no-fire).
+ *
+ * g-const-only-module-no-server-emit (sPA ss1 item 2) — the SIBLING residual to
+ * the above: the MISSING-FILE branch (a). A const-only module that exports
+ * runtime VALUE bindings (constants / pure fns) and is server-imported by-name
+ * now ALSO emits a minimal VALUE-ONLY `.server.js` (api.js on-import pre-pass +
+ * emit-server.generateValueOnlyServerJs), so the dangling import resolves and
+ * the MISSING-FILE warning STOPS firing for that class (§3 asserts the no-fire +
+ * the emitted value export). The branch STILL fires for a module that is
+ * server-imported by-name but has NO server-importable value export — a
+ * TYPE-only / markup-component-only module (nothing to emit; the import is
+ * genuinely unresolvable) — §4 uses that still-firing shape for the partition.
  *
  * The warning is non-fatal: it partitions into result.warnings (W- prefix +
  * severity:"warning"), so the build still exits 0 (per the api.js S93 partition).
@@ -99,11 +107,13 @@ function loadCount() { return ?{ select 1 as n } }
 });
 
 // ---------------------------------------------------------------------------
-// §3. MISSING-FILE — a const-only module (no server content) used server-side:
-//     no .server.js is emitted for it, but the import survives → warning.
+// §3. MISSING-FILE RESOLVED (g-const-only-module-no-server-emit) — a const-only
+//     module that exports a runtime VALUE binding, server-imported by-name, now
+//     emits a minimal VALUE-ONLY `.server.js` (on-import pre-pass), so the
+//     import resolves → the warning NO LONGER fires.
 // ---------------------------------------------------------------------------
-describe("W-SERVER-IMPORT-UNEMITTED §3: const-only module used server-side (missing file)", () => {
-  test("fires when the imported module emits no .server.js", () => {
+describe("W-SERVER-IMPORT-UNEMITTED §3: const-only value module used server-side (value-only .server.js emitted)", () => {
+  test("does NOT fire — the const-only module now emits its value export", () => {
     const dir = join(TMP, "s3");
     fx(join(dir, "src/consts.scrml"), `\${ export const TTL = 3600 }\n`);
     const app = fx(join(dir, "src/app.scrml"), `<program db="sqlite::memory:">
@@ -118,25 +128,38 @@ function loadIt() {
 </program>
 `);
     const r = compile(dir, app);
-    expect(hasW(r)).toBe(true);
+    // Pre-fix this FIRED (consts.scrml short-circuited to "" → no .server.js).
+    // Post-fix the value-only .server.js is emitted, so the by-name server
+    // import resolves and the MISSING-FILE warning no longer fires.
+    expect(hasW(r)).toBe(false);
+    // Belt-and-suspenders: consts.server.js IS emitted and DOES export TTL as a
+    // native ESM value binding (not a type, not a route).
+    const constsServer = join(dir, "out", "consts.server.js");
+    expect(existsSync(constsServer)).toBe(true);
+    expect(readFileSync(constsServer, "utf8")).toMatch(/export\s+const\s+TTL\s*=\s*3600\s*;/);
   });
 });
 
 // ---------------------------------------------------------------------------
-// §4. Partition — the warning is non-fatal (result.warnings, NOT result.errors).
+// §4. STILL-FIRING + non-fatal partition — a module that is server-imported
+//     by-name but has NO server-importable VALUE export (a markup-component
+//     const → no runtime value to export) genuinely dangles, so the MISSING-FILE
+//     warning STILL fires; assert it partitions into result.warnings (W- prefix
+//     + severity:"warning"), never result.errors.
 // ---------------------------------------------------------------------------
-describe("W-SERVER-IMPORT-UNEMITTED §4: non-fatal partition", () => {
+describe("W-SERVER-IMPORT-UNEMITTED §4: no-value-export module still fires + non-fatal partition", () => {
   test("the code lands in result.warnings and never in result.errors", () => {
-    // Use the STILL-FIRING MISSING-FILE shape (a const-only module that emits no
-    // `.server.js`) — the ss1-resolved MISSING-EXPORT shape no longer fires.
     const dir = join(TMP, "s4");
-    fx(join(dir, "src/consts.scrml"), `\${ export const TTL = 3600 }\n`);
+    // A markup-component const is resolved at markup-mount time, NOT a runtime
+    // JS value — generateValueOnlyServerJs emits nothing for it, so the import
+    // is genuinely unresolvable and the MISSING-FILE warning still fires.
+    fx(join(dir, "src/comp.scrml"), `\${ export const Card = <div>card</div> }\n`);
     const app = fx(join(dir, "src/app.scrml"), `<program db="sqlite::memory:">
-\${ import { TTL } from './consts.scrml' }
+\${ import { Card } from './comp.scrml' }
 <n> = 0
 function loadIt() {
   const r = ?{ select 1 as n }
-  @n = TTL
+  @n = Card
 }
 <button onclick=loadIt()>go</button>
 <p>\${@n}</p>
@@ -145,5 +168,29 @@ function loadIt() {
     const r = compile(dir, app);
     expect(r.warnings.some((w) => w.code === W)).toBe(true);
     expect(r.errors.some((e) => e.code === W)).toBe(false);
+    // The component module emits no .server.js (nothing server-importable).
+    expect(existsSync(join(dir, "out", "comp.server.js"))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §5. SCOPE GUARD — a const-only module that is NOT server-imported by-name does
+//     NOT get a dead value-only `.server.js` force-emitted (client-only modules
+//     must not churn). The on-import pre-pass only emits for ACTUAL dangling
+//     server imports.
+// ---------------------------------------------------------------------------
+describe("W-SERVER-IMPORT-UNEMITTED §5: client-only const module is NOT force-emitted", () => {
+  test("no .server.js for a const module used only client-side", () => {
+    const dir = join(TMP, "s5");
+    fx(join(dir, "src/consts.scrml"), `\${ export const LABEL = "hi" }\n`);
+    const app = fx(join(dir, "src/app.scrml"), `<program db="sqlite::memory:">
+\${ import { LABEL } from './consts.scrml' }
+<p>\${LABEL}</p>
+</program>
+`);
+    const r = compile(dir, app);
+    // No server import → no dangling → no warning AND no dead consts.server.js.
+    expect(hasW(r)).toBe(false);
+    expect(existsSync(join(dir, "out", "consts.server.js"))).toBe(false);
   });
 });
