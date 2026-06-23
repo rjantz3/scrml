@@ -6283,6 +6283,13 @@ const LOGIC_SCOPE_GLOBAL_ALLOWLIST: ReadonlySet<string> = new Set([
   // codegen pipeline to _scrml_replay(...). Allowlisted here so the
   // scope-check pass doesn't flag it as an undeclared identifier.
   "replay",
+  // §16 — `render(component)` client component-render builtin. Lowered by
+  // codegen (emit-expr); the C3 shadowing fix (S214) makes it yield to a user
+  // `function render` when one is in scope. Allowlisted so a bare `render()`
+  // call with NO user `function render` does NOT fire a spurious E-SCOPE-001
+  // (g-typer-render-call-not-in-builtin-allowlist, S215; mirrors the C1
+  // animationFrame allowlist class).
+  "render",
   // §14.12.6.3 — transition() built-in. Compile-time-only marker for
   // lifecycle-annotated value progression (per S131 — HU-2 hybrid). The
   // function emits no runtime code; the type-system walker

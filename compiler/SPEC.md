@@ -4315,7 +4315,7 @@ The `<request>` body calls a server function. E-RI-002 does NOT apply to the sin
 
     <div>
         ${
-            if (<#profile>.loading && not <#profile>.stale) {
+            if (<#profile>.loading && !<#profile>.stale) {
                 lift <p>Loading...</>
             } else if (<#profile>.error) {
                 lift <p>Error: ${<#profile>.error.message}</>
@@ -4339,11 +4339,12 @@ The `<request>` body calls a server function. E-RI-002 does NOT apply to the sin
 
     <div>
         ${
-            if (@appConfig == not) {
+            if (@appConfig is not) {
                 lift <p>Loading config...</>
             } else {
                 lift <div class="app">
-                    /* render using @appConfig *</>
+                    <h1>${@appConfig.title}</h1>
+                    <p>${@appConfig.tagline}</p>
                 </>
             }
         }

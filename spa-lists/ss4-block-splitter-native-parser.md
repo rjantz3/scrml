@@ -4,6 +4,8 @@
 
 **Fill:** ~55% · `healthy` (multiple same-ingestion parse-front-end items; big M2-M6 flip arc → Bucket B)
 
+> **⚠ DRAINED / STALE LIST (currency-corrected S215).** All 3 items below are done: item-1 `g-block-match-in-lift` **RESOLVED S213** (`43a996c1`, `E-MATCH-BLOCK-IN-LIFT`); items 2-3 **INTEGRATED S211** (`3cd58aa4` / `05df4c48`); `spa/ss4` branch GONE. The per-item `[parked]`/`[landed-on-branch]` statuses below were never updated post-integration. Residual tails only: lexer test-skips (LOW) + `g-decl-span-overshoot-systemic` (LOW, consumer-gated). Do NOT re-dispatch these.
+
 ## Shared ingestion
 Block-splitter + native-parser parse-context: `block-splitter.js`/`.ts`, `component-expander.ts`,
 `native-parser/lex.js`+`token.js`, `ast-builder.js` (fn-decl span computation + block-analysis

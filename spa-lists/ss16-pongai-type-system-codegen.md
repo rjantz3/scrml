@@ -3,6 +3,8 @@
 **Launch:** `read spa.md ss16` · **Branch:** `spa/ss16` · **Worktree:** `../scrml-spa-ss16`
 **Built:** S214 (2026-06-22) from the PongAI adopter cluster (C3/C4/C5 — all root-caused S213).
 
+> **⚠ DRAINED / STALE LIST (currency-corrected S215).** All 3 items (C5/C4/C3) **INTEGRATED S214** (`6650f1eb` — `W-RENDER-SHADOWED` / `W-EQ-PAYLOAD-VARIANT` are in the SPEC + §34); `spa/ss16` branch GONE. The per-item `[open]` statuses below were never updated post-integration. Residual: `g-typer-render-call-not-in-builtin-allowlist` (LOW) **RESOLVED S215 PA-direct**. Do NOT re-dispatch these.
+
 > **Reproduce-first, always.** Each item was PA-root-caused S213 but no fix has landed — confirm each
 > still reproduces on current HEAD before briefing (R26). The repro corpus is the PongAI app +
 > `handOffs/scrml-bug-report-pongai-s213.md` (the PongAI consolidated report; relocated from the project root S214).
