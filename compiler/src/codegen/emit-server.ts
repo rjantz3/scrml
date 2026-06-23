@@ -1093,6 +1093,34 @@ export function generateServerJs(
     lines.push("");
   }
 
+  // ---- Issue #1 (parent scrmlTS): server-fn → server-fn in-process calls ----
+  // A server function invoked from a SIBLING server function's body needs a
+  // plain in-process callable. The per-fn route handler (`_scrml_handler_*`) is
+  // a Request->Response wrapper, not a callable, so a body-level `nextOrder()`
+  // reference had no binding → "nextOrder is not defined" at runtime. We register
+  // every "simple" server fn (non-CPS, non-SSE, non-channel) as a peer-callable
+  // name so its call sites lower to `await <name>(...)` (emit-expr serverFnNames
+  // path), and — AFTER the handler loop — emit `async function <name>(<params>)
+  // { <body> }` for each peer that some server-fn body actually calls. Function
+  // declarations hoist, so the emission order relative to the handlers is moot.
+  // Restricting to simple fns keeps the emission surgical: CPS/SSE/channel fns
+  // (whose bodies are split or context-bound) keep the pre-fix behavior, and a
+  // program that never composes server fns is byte-unchanged.
+  const _peerCallableInfo = new Map<string, { fnNode: any; paramNames: string[] }>();
+  const _serverFnPeerNames = new Set<string>();
+  for (const { fnNode: _pfn, route: _proute } of serverFns) {
+    const _pn = _pfn?.name;
+    if (typeof _pn !== "string" || _pn.length === 0) continue;
+    if (_proute?.cpsSplit || _proute?.isSSE) continue;
+    if (channelFnMap.has(_pn)) continue;
+    const _pparams: any[] = _pfn.params ?? [];
+    const _pparamNames: string[] = _pparams.map((p: any, i: number) =>
+      typeof p === "string" ? p.split(":")[0].trim() : (p.name ?? `_scrml_arg_${i}`)
+    );
+    _serverFnPeerNames.add(_pn);
+    _peerCallableInfo.set(_pn, { fnNode: _pfn, paramNames: _pparamNames });
+  }
+
   for (const { fnNode, route } of serverFns) {
     const name: string = fnNode.name ?? "anon";
     const routeName: string = route.generatedRouteName;
@@ -1156,6 +1184,8 @@ export function generateServerJs(
         boundary: "server" as const,
         declaredNames: new Set<string>(fnParamNames),
         insideFunctionBody: true,
+        // Issue #1: resolve sibling server-fn calls to in-process peer callables.
+        serverFnNames: _serverFnPeerNames,
       };
 
       for (const stmt of body) {
@@ -1494,6 +1524,8 @@ export function generateServerJs(
         channelOwnedCells: _channelOwnedCells,
         declaredNames: new Set<string>(paramNames),
         insideFunctionBody: true,
+        // Issue #1: resolve sibling server-fn calls to in-process peer callables.
+        serverFnNames: _serverFnPeerNames,
       };
 
       const body: any[] = fnNode.body ?? [];
@@ -1655,6 +1687,8 @@ export function generateServerJs(
         channelOwnedCells: _channelOwnedCellsNonCsrf,
         declaredNames: new Set<string>(paramNames),
         insideFunctionBody: true,
+        // Issue #1: resolve sibling server-fn calls to in-process peer callables.
+        serverFnNames: _serverFnPeerNames,
       };
 
       const body: any[] = fnNode.body ?? [];
@@ -1807,6 +1841,48 @@ export function generateServerJs(
     } // end per-batch emit loop (Ext 1 M1.5)
   }
 
+  // ---- Issue #1 (parent scrmlTS): emit in-process peer callables ----
+  // For every "simple" server fn that some server-fn body actually calls (the
+  // serverFnNames lowering emits `await <name>(`), emit a plain module-scope
+  // `async function <name>(<params>) { <body> }` so the call resolves in-process
+  // instead of referencing the undefined `<name>` symbol. We gate on actual
+  // usage (scan the already-emitted handler text — every server fn has a handler,
+  // so every peer-call edge appears there) to keep non-composing programs
+  // byte-identical to the pre-fix output.
+  if (_serverFnPeerNames.size > 0) {
+    const _emittedHandlers = lines.join("\n");
+    for (const [_peerName, _peerInfo] of _peerCallableInfo) {
+      const _escPeer = _peerName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const _calledRe = new RegExp(`\\bawait\\s+${_escPeer}\\s*\\(`);
+      if (!_calledRe.test(_emittedHandlers)) continue;
+      const _peerOpts = {
+        boundary: "server" as const,
+        channelOwnedCells: null,
+        declaredNames: new Set<string>(_peerInfo.paramNames),
+        insideFunctionBody: true,
+        serverFnNames: _serverFnPeerNames,
+      };
+      const _peerBodyLines: string[] = [];
+      for (const stmt of (_peerInfo.fnNode.body ?? [])) {
+        const code = serverRewriteEmitted(emitLogicNode(stmt, _peerOpts));
+        if (code) {
+          for (const line of code.split("\n")) _peerBodyLines.push(`  ${line}`);
+        }
+      }
+      lines.push(`// Issue #1: in-process peer callable for server function "${_peerName}"`);
+      lines.push(`async function ${_peerName}(${_peerInfo.paramNames.join(", ")}) {`);
+      // Server-mode `@cell` reads lower to `_scrml_body["cell"]`; an in-process
+      // peer call has no HTTP request body, so define an empty fallback (mirrors
+      // the §38.6.1 onserver-handler precedent) to avoid a ReferenceError.
+      if (_peerBodyLines.some((l) => l.includes("_scrml_body"))) {
+        lines.push(`  const _scrml_body = {};`);
+      }
+      for (const l of _peerBodyLines) lines.push(l);
+      lines.push(`}`);
+      lines.push("");
+    }
+  }
+
   // §8.11 Mount-Hydration Coalescing — synthetic __mountHydrate route.
   // Emitted iff ≥2 `server @var` decls carry callable initExprs. Body awaits
   // all loaders in parallel (Promise.all) and returns a keyed JSON object.
@@ -1910,6 +1986,8 @@ export function generateServerJs(
         channelOwnedCells: _wsChannelOwnedCells,
         declaredNames: new Set<string>(wsParamNames),
         insideFunctionBody: true,
+        // Issue #1: resolve sibling server-fn calls to in-process peer callables.
+        serverFnNames: _serverFnPeerNames,
       };
       const wsBody: any[] = fnNode.body ?? [];
       const _wsBodyLines: string[] = [];
