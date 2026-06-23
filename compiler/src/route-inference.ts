@@ -879,6 +879,80 @@ export function walkBodyForTriggers(
   const warnings: RouteWarning[] = [];
 
   /**
+   * g-route-001 (sPA ss1 item 1): function-body-LOCAL array bindings whose
+   * initializer is a copy-on-write array construction (e.g. `.slice()`, array
+   * literal, `.map(...)`) AND references NO protected field. A computed-member
+   * write on such a binding (`result[idx] = ...`) can NEVER reach a protected
+   * record, so E-ROUTE-001 is suppressed for it.
+   *
+   * Populated in the let/const/tilde-decl branch (visited before nested
+   * bare-exprs, since the decl is a top-level body statement and the write is
+   * nested inside for/if). The set is function-body-scoped: a fresh walker
+   * runs per function, so cross-function leakage is impossible.
+   */
+  const localArrayBindings = new Set<string>();
+
+  /**
+   * g-route-001: a binding initializer is array-COW (yields a fresh local
+   * array with no protected provenance) when it matches one of these shapes.
+   * Conservative: anything not matched here is NOT treated as a safe local,
+   * so E-ROUTE-001 keeps firing (no false suppression).
+   *
+   *   - `.slice(`              — the flux `nonce.slice()` case
+   *   - leading `[`            — array literal / spread (`[...xs]`, `[]`)
+   *   - `.map(` `.filter(` `.concat(` `.flat(` `.flatMap(` — array-returning chains
+   *   - `Array.from(` `Array(` `new Array(`
+   *   - `Object.keys(` `Object.values(` `Object.entries(` — array-returning
+   */
+  function isArrayCowInit(init: string): boolean {
+    const s = init.trim();
+    if (s.startsWith("[")) return true;
+    return (
+      /\.slice\s*\(/.test(s) ||
+      /\.map\s*\(/.test(s) ||
+      /\.filter\s*\(/.test(s) ||
+      /\.concat\s*\(/.test(s) ||
+      /\.flat\s*\(/.test(s) ||
+      /\.flatMap\s*\(/.test(s) ||
+      /\bArray\s*\.\s*from\s*\(/.test(s) ||
+      /\bnew\s+Array\s*\(/.test(s) ||
+      /\bArray\s*\(/.test(s) ||
+      /\bObject\s*\.\s*(keys|values|entries)\s*\(/.test(s)
+    );
+  }
+
+  /**
+   * g-route-001: does `init` reference any protected field, such that the
+   * resulting array could carry protected provenance? Matches both
+   * `record.field` member access (via bareExprAccessesField) AND a bare
+   * leading `field` identifier at a member-receiver position
+   * (`field.slice()`), so `let r = protectedField.slice()` is NOT suppressed.
+   */
+  function initReferencesProtectedField(init: string): boolean {
+    for (const fieldName of protectedFields) {
+      if (bareExprAccessesField(init, fieldName)) return true;
+      // bare leading receiver: `field.` / `field[` / `field )`...
+      if (new RegExp(`\\b${escapeRegex(fieldName)}\\b`).test(init)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * g-route-001: extract every computed-member receiver name from an
+   * expression — the identifier immediately before each `[`. Returns the list
+   * (may have duplicates; callers only care about membership).
+   *   `result[idx] = result[idx] + 1` → ["result", "result"]
+   *   `row[fieldKey]`                  → ["row"]
+   */
+  function computedMemberReceivers(expr: string): string[] {
+    const re = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*\[/g;
+    const out: string[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(expr)) !== null) out.push(m[1]);
+    return out;
+  }
+
+  /**
    * D2c helper: scan an expression string for member-access references to
    * any name imported from a server-only runtime source. Returns the first
    * matching name, or null.
@@ -950,17 +1024,30 @@ export function walkBodyForTriggers(
       // E-ROUTE-001: computed member access warning.
       // Suppressed inside worker bodies — workers have no protected fields or shared
       // reactive state, so computed array indexing (e.g., flags[i]) is safe and expected.
+      //
+      // g-route-001 (sPA ss1 item 1): also suppressed when EVERY computed-member
+      // receiver in the expr is a known function-body-local array binding (COW
+      // init, no protected provenance) — such a receiver can never reach a
+      // protected field. Fire only if at least one receiver is NOT a known-safe
+      // local (i.e. a param/unknown receiver like `row[fieldKey]` that COULD be
+      // a protected record).
       if (!isWorkerBody && COMPUTED_MEMBER_REGEX.test(expr)) {
-        warnings.push({
-          code: "E-ROUTE-001",
-          message:
-            `E-ROUTE-001: Computed member access detected in expression \`${expr.slice(0, 80)}\`. ` +
-            `The compiler cannot statically determine the accessed property name. ` +
-            `If this accesses a protected field via a computed key, it will not be detected by route inference. ` +
-            `Use a direct property access (e.g., \`row.fieldName\`) to ensure correct route placement.`,
-          span: node.span,
-          severity: "warning",
-        });
+        const receivers = computedMemberReceivers(expr);
+        const hasUnsafeReceiver =
+          receivers.length === 0 ||
+          receivers.some((r) => !localArrayBindings.has(r));
+        if (hasUnsafeReceiver) {
+          warnings.push({
+            code: "E-ROUTE-001",
+            message:
+              `E-ROUTE-001: Computed member access detected in expression \`${expr.slice(0, 80)}\`. ` +
+              `The compiler cannot statically determine the accessed property name. ` +
+              `If this accesses a protected field via a computed key, it will not be detected by route inference. ` +
+              `Use a direct property access (e.g., \`row.fieldName\`) to ensure correct route placement.`,
+            span: node.span,
+            severity: "warning",
+          });
+        }
       }
 
       return; // Don't recurse into bare-expr text.
@@ -1026,6 +1113,23 @@ export function walkBodyForTriggers(
 
       // Callee extraction from the init expression.
       callees.push(...extractCalleesFromNode(node, "init"));
+
+      // g-route-001 (sPA ss1 item 1): record function-body-local array bindings
+      // whose init is COW (yields a fresh local array) AND references no
+      // protected field. A computed-member write on such a binding later in the
+      // body can never reach a protected record, so E-ROUTE-001 is suppressed
+      // for it. Only the simple named-decl case is recorded; destructuring /
+      // unnamed decls are skipped (conservative — they keep warning).
+      const declName = (node as any).name;
+      if (
+        typeof declName === "string" &&
+        declName.length > 0 &&
+        isArrayCowInit(init) &&
+        !initReferencesProtectedField(init)
+      ) {
+        localArrayBindings.add(declName);
+      }
+
       return;
     }
 

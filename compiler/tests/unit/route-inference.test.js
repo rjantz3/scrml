@@ -1076,6 +1076,131 @@ describe("§11 — E-ROUTE-001: computed member access warning", () => {
     const warnings = errors.filter(e => e.code === "E-ROUTE-001");
     expect(warnings).toHaveLength(0);
   });
+
+  // -------------------------------------------------------------------------
+  // g-route-001 (sPA ss1 item 1): suppress E-ROUTE-001 for pure-fn LOCAL
+  // array writes (COW init, no protected provenance). Receiver-reachability:
+  // a computed write on a fresh local array can never reach a protected field.
+  // -------------------------------------------------------------------------
+
+  test("g-route-001: computed write on a .slice() local array — no E-ROUTE-001", () => {
+    // Mirrors examples/28-flux.scrml bumpLeftVision(): `let result = nonce.slice()`
+    // then `result[idx] = result[idx] + 1`. result is a COW local — cannot reach
+    // a protected field — so the warning must be suppressed.
+    const fn = makeFunctionDecl({
+      name: "bumpLocal",
+      body: [
+        makeLetDecl("result", "nonce.slice()"),
+        makeBareExpr("result[idx] = result[idx] + 1"),
+      ],
+      spanStart: 10,
+    });
+    const fileAST = makeFileAST("/test/app.scrml", [fn]);
+    const { errors } = runRIClean([fileAST]);
+
+    const warnings = errors.filter(e => e.code === "E-ROUTE-001");
+    expect(warnings).toHaveLength(0);
+  });
+
+  test("g-route-001: computed write on an array-literal local — no E-ROUTE-001", () => {
+    const fn = makeFunctionDecl({
+      name: "buildLocal",
+      body: [
+        makeLetDecl("r", "[]"),
+        makeBareExpr("r[i] = x"),
+      ],
+      spanStart: 10,
+    });
+    const fileAST = makeFileAST("/test/app.scrml", [fn]);
+    const { errors } = runRIClean([fileAST]);
+
+    const warnings = errors.filter(e => e.code === "E-ROUTE-001");
+    expect(warnings).toHaveLength(0);
+  });
+
+  test("g-route-001: computed write on a .map() local — no E-ROUTE-001", () => {
+    const fn = makeFunctionDecl({
+      name: "mapLocal",
+      body: [
+        makeLetDecl("r", "src.map(f)"),
+        makeBareExpr("r[i] = r[i] + 1"),
+      ],
+      spanStart: 10,
+    });
+    const fileAST = makeFileAST("/test/app.scrml", [fn]);
+    const { errors } = runRIClean([fileAST]);
+
+    const warnings = errors.filter(e => e.code === "E-ROUTE-001");
+    expect(warnings).toHaveLength(0);
+  });
+
+  test("g-route-001: local with PROTECTED provenance (`protectedField.slice()`) — still warns", () => {
+    // `let r = passwordHash.slice()` carries protected provenance, so a computed
+    // write on r could expose a protected field — the warning must NOT be
+    // suppressed.
+    const pa = makeProtectAnalysis("/test/app.scrml::0", "users", ["passwordHash"]);
+    const fn = makeFunctionDecl({
+      name: "leakLocal",
+      body: [
+        makeLetDecl("r", "passwordHash.slice()"),
+        makeBareExpr("r[idx] = r[idx] + 1"),
+      ],
+      spanStart: 10,
+    });
+    const fileAST = makeFileAST("/test/app.scrml", [fn]);
+    const { errors } = runRI({ files: [fileAST], protectAnalysis: pa });
+
+    const warnings = errors.filter(e => e.code === "E-ROUTE-001");
+    expect(warnings.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("g-route-001: local with member PROTECTED provenance (`row.passwordHash.slice()`) — still warns", () => {
+    const pa = makeProtectAnalysis("/test/app.scrml::0", "users", ["passwordHash"]);
+    const fn = makeFunctionDecl({
+      name: "leakMemberLocal",
+      body: [
+        makeLetDecl("r", "row.passwordHash.slice()"),
+        makeBareExpr("r[idx] = r[idx] + 1"),
+      ],
+      spanStart: 10,
+    });
+    const fileAST = makeFileAST("/test/app.scrml", [fn]);
+    const { errors } = runRI({ files: [fileAST], protectAnalysis: pa });
+
+    const warnings = errors.filter(e => e.code === "E-ROUTE-001");
+    expect(warnings.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("g-route-001: param/unknown receiver (`row[fieldKey]`, no local decl) — still warns (regression guard)", () => {
+    const fn = makeFunctionDecl({
+      name: "getDynField",
+      body: [makeBareExpr("return row[fieldKey]")],
+      spanStart: 10,
+    });
+    const fileAST = makeFileAST("/test/app.scrml", [fn]);
+    const { errors } = runRIClean([fileAST]);
+
+    const warnings = errors.filter(e => e.code === "E-ROUTE-001");
+    expect(warnings.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test("g-route-001: mixed receivers — local + unknown in same expr — still warns", () => {
+    // `r[i] = row[fieldKey]` : r is a known-safe local, but row is unknown — at
+    // least one unsafe receiver means the warning must still fire.
+    const fn = makeFunctionDecl({
+      name: "mixedReceivers",
+      body: [
+        makeLetDecl("r", "src.slice()"),
+        makeBareExpr("r[i] = row[fieldKey]"),
+      ],
+      spanStart: 10,
+    });
+    const fileAST = makeFileAST("/test/app.scrml", [fn]);
+    const { errors } = runRIClean([fileAST]);
+
+    const warnings = errors.filter(e => e.code === "E-ROUTE-001");
+    expect(warnings.length).toBeGreaterThanOrEqual(1);
+  });
 });
 
 // ---------------------------------------------------------------------------

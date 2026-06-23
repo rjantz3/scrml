@@ -42,3 +42,23 @@ Branch: spa/ss1 · Worktree: ../scrml-spa-ss1 · provisioned off origin/main 72d
 
 ## ss1 SESSION DISPOSITION (S208): 6/6 items dispositioned
 - Item 1 INTEGRATED-PENDING (landed spa/ss1 @795704c1, code fix). Item 6 LANDED (doc close). Items 2/3/4/5 PARKED→PA (design-deferred / async-blocked / post-v1). PA re-integrates spa/ss1 → main + routes 2/3/4/5 to the design track.
+
+## 2026-06-23 (S215 REFRESH RUN — new 5-item list)
+- BOOT: prior S208 run fully re-integrated by PA (795704c1 in main; old worktree+branch cleaned). Fresh worktree spa/ss1 provisioned off LIVE main HEAD `0d4ba428` (session-start snapshot df6f747b was stale; 0d4ba428 includes the S215 list refresh + typer render-allowlist). node_modules symlinked; status clean; lineage sane.
+- ITEM 1 `g-route-001-local-computed-write` [DISPATCHED]:
+  - R26 REPRODUCED: examples/28-flux.scrml `bumpLeftVision()` — `let result = nonce.slice()` then `result[idx]=result[idx]+1` over-fires E-ROUTE-001 (1 fire, 2 warnings total). Fire site route-inference.ts:953 `COMPUTED_MEMBER_REGEX.test(expr)` — zero receiver-reachability check.
+  - Root: walkBodyForTriggers warns on ANY `ident[` outside worker bodies. Fix = function-body-scoped localArrayBindings set (populated in let/const/tilde-decl branch when init is array-COW + references no protected field), suppress E-ROUTE-001 when ALL computed receivers are known-safe locals. Walker visits decl before nested use → ordering works.
+  - Dispatched scrml-js-codegen-engineer (agent af0f8f7618ba19be4, isolation:worktree, opus). BRIEF.md archived docs/changes/route001-local-array-suppress-2026-06-23/. Scope-guarded to route-inference.ts + its unit test.
+- ITEM 2 `g-const-only-module-no-server-emit` [SCOPED, brief drafted, held for sequencing]:
+  - Code-path proof: emit-server.ts:761-768 short-circuits `return ""` for const-only modules BEFORE emitModuleValueExportLines (called 1997) is reached → no .server.js. api.js:2145 MISSING-FILE branch then fires when server-imported. emitModuleValueExportLines (340-541) already filters to value-only (no erased types).
+  - Fix decision (R3): on-import emission (cross-file, only for actually-server-imported const-only modules) NOT always-emit (corpus churn). BRIEF.md drafted docs/changes/const-only-module-server-emit-2026-06-23/. Agent builds the repro in Phase 0.
+- ITEM 3 `g-section52-server-cell-load-codegen` [SPEC located, light-touch]:
+  - R4: §52 = SPEC.md 28914-29798 (READ-authority + reactive-wiring; persist-write is dev's explicit ?{} server fn — matches item-3 READ/LOAD-only scope). §51.0.E = 25318. Full read deferred to brief-time (after items 1-2 land; emit-server surface shifts under item 2).
+- SEQUENCING: running items SEQUENTIALLY (not parallel) — items 1/4/5 all edit route-inference.ts (line-disjoint but same file), items 2/3 share emit-server.ts; S211 shared-baseline collision lesson. Item 5 blocked-by item 3 (dependency). Order: 1 → 2 → 3 → 4 → 5.
+
+### ITEM 1 LANDED [landed-on-branch spa/ss1]
+- Agent af0f8f7618ba19be4 @d2da0729 (base ff-merged to 0d4ba428). File-delta'd route-inference.ts + route-inference.test.js onto spa/ss1.
+- Independent R26 (sPA, on spa/ss1 working tree): flux E-ROUTE-001 1→0; flux total warnings 2→1 (remaining = info W-PROGRAM-SPA-INFERRED, unrelated). route-inference.test.js 180→188 pass (+8 g-route-001), 0 fail.
+- Fix: receiver-reachability gate — localArrayBindings (body-scoped, COW-init + no-protected-provenance) suppresses E-ROUTE-001 when ALL computed receivers are known-safe locals; fires if any receiver is param/unknown (row[fieldKey]). Warning-scope only; escalation/route logic untouched.
+- Adversarial review (S215): controls cover param-receiver / protected-provenance-slice / member-protected-slice / mixed-receiver / worker-body / direct-only — all fire-correct. Noted exotic over-suppression residual (a COW local later REASSIGNED to protected data via bare assignment stays in safe set) — accepted: E-ROUTE-001 is advisory-only, never escalates routing, so a missed advisory there is harmless.
+- spa/ss1 commit SHA recorded next append.
