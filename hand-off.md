@@ -1,33 +1,39 @@
-# scrml — Session 214 (OPEN — mid-session)
+# scrml — Session 214 (CLOSE)
 
-**Date:** 2026-06-22. **Profile:** A — FULL. **Boot:** cold (S213 digest STALE → authoritative fallback). **Deputy:** not running this session. A big **pa-base / sPA / flogence-workflow** design session — the language compiler was mostly untouched; the work was the PA-system infrastructure.
+**Date:** 2026-06-22→23. **Profile:** A — FULL. **Boot:** cold (digest STALE → authoritative fallback). **Deputy:** LIVE all session (ticks 181→186+). A **pa-base / sPA / flogence-workflow** infrastructure session + a 2-sPA execution wave; the compiler was touched only via the sPAs.
 
-> **Thinned (S205).** Mechanical board → `bun scripts/state.ts` + digest. Irreducible + open below. The pa-base thread's durable capture lives in **`scrmlMaster/pa-base/`** (its own repo — registry + DISTILLATION-v2 + vpa-base); this hand-off references it, doesn't duplicate it.
+> **Thinned (S205).** Mechanical board → `bun scripts/state.ts` + `handOffs/digest.md`. The pa-base arc's durable capture lives in **`scrmlMaster/pa-base/`** (own repo). Irreducible + open below.
+
+## Board @ close
+HIGH 0 · MED 10 · LOW 16 · Nominal 8 · 220 @gap tokens · v0.7.0. Full suite green at every landing. origin/main pushed through the ss16 integration (`a93223fe`); ss15 integration + this wrap are the final push.
 
 ## ✅ DONE this session
-1. **giti PA modernized — vendored pa-base.** `giti/pa-base.md` (v1) + rewrote `giti/pa.md` as the giti overlay (all slots + Layer-3 preserved); fixed `6NZ/`→`6nz/` outbox, `agentStore`→`agents-store`. Commit `724500b` — **UNPUSHED; a LIVE giti session owns the push** (its `hand-off.md`/`ui/history.scrml` committed in parallel mid-session; my commit used explicit pathspec, disjoint, no sweep).
-2. **`pa-base` project stood up** (`scrmlMaster/pa-base`, own git repo, local-only). The audit verdict: the extraction model is PROVEN (cementer exemplary + overlay-v2, PongAI clean) but had NO running owner → base froze at v1, adoption stalled (giti done S214; 6nz owed). README (incl. the **flogence reframe**: deputy = agent-era testbed for a deterministic scrml layer; durable doctrine vs transitional impl) · registry (the audit) · DISTILLATION-v2 · **vpa-base v1-draft**.
-3. **pa-base v2 distillation — Parts A+B done.** Part A: 5 sharpenings folded (context-economics + PA-is-partner · wrap-recalibration · parallel-baseline-collision · transient-notification), stamp → `v2-draft`. Part B: `vpa-base.md` distilled (the agnostic deputy = offload contract, framed transitional). **Ruling: deputy-less until need** (adoption per-project on-demand; giti/6nz stay deputy-less). Commits `2d9dccc` + `dc56860`.
-4. **Scoped CSS — answered + documented.** VERIFIED end-to-end (`@scope ([data-scrml="Card"]) to ([data-scrml])`, no class-mangling, donut) — it's in good shape; the gap was docs. Added PRIMER **§9.8**. Filed **§S214 `g-tailwind-lint-false-fires-on-scoped-class`** (LOW — the lint false-fires on your own scoped-`#{}` classes; fix-direction scoped).
-5. **sPA ss15 + ss16 BUILT** (from the scrml-compiler queue, clustered by shared ingestion): **ss15 render-collection-codegen** (5: tailwind-scoped-class lint · on-mount slot · request-lift D1/D2 · §6.7.7 doc) + **ss16 pongai-type-system-codegen** (3: C5 ctor-arg typing · C4 ==-vs-payload lint · C3 render-shadowing). INDEX updated. **User fires them next** (`read spa.md ss15` / `ss16`), parallel (ingestion-disjoint); PA re-integrates.
-6. **2 flogence dogfood bugs triaged (R26).** `bind:value no-listener` (HIGH reported) → **NOT-REPRODUCED** on current HEAD (stale flogence dist — wiring present + correct; a verify-before-claim ghost). `on mount {bareCall()}` spurious render slot (MED→HIGH) → **REPRODUCED** (`_scrml_render_value(el, _scrml_val_2())`) → it's **ss15 item 2**.
+**A — PA-system infrastructure (the headline):**
+1. **`pa-base` project stood up** (`scrmlMaster/pa-base`, own git repo, local-only). Audit verdict: the extraction model is PROVEN (cementer exemplary, PongAI clean) but had NO running owner → base froze at v1, adoption stalled. README (incl. the **flogence reframe**: deputy = agent-era testbed for a deterministic scrml layer) · registry (the audit) · DISTILLATION-v2 · vpa-base.
+2. **pa-base v2 distillation: A ✅ · B ✅ · C (DRAFT, ruling owed) · D ✅.** A = 5 sharpenings folded. B = `vpa-base.md` (agnostic deputy = offload contract, transitional). C = §12 agent role taxonomy DRAFTED (PA + vPA/sPA/dPA/cPA; 5 invariants). D = maps-transitional banner. **Ruling: deputy-less until need.** Commits in pa-base: `9c15406`→`f5b429a`.
+3. **giti PA modernized** — vendored pa-base v1 + giti overlay (`724500b`, UNPUSHED — live giti session owns push); fixed `6NZ/`→`6nz/`, `agentStore`→`agents-store`.
+4. **Scoped CSS** — VERIFIED end-to-end (`@scope`, no mangle, donut); PRIMER §9.8 added.
 
-## ⏸️ OPEN — the non-sPA queue (PA returns to these AFTER the user fires the sPAs)
-- **pa-base distillation remaining (to cut v2):** **Part C** role taxonomy (sPA → dPA → cPA, one-at-a-time, AXIOM — start sPA, it's the most-built); **Part D** maps-transitional banner on pa-base §5; then **cut `pa-base v2`** → re-vendor cementer/PongAI/giti + vend 6nz + tombstone the scrml-support copy.
-- **flogence acks (cross-repo, confirm-before-send):** reply on `bind:value` = NOT-REPRODUCED, rebuild `src/dist/` against HEAD `dd5331e2` + re-verify; the on-mount bug is now ss15 item 2. Then move both inbox msgs → `read/`.
-- **sPA re-integration:** when ss15/ss16 land on `spa/ss15`/`spa/ss16`, PA verifies (S147 coherence) + FF-merges + pushes.
-- **6nz vend** — BLOCKED on the 6nz sibling session's diverged+dirty git; coordinate via inbox, don't touch its tree.
+**B — the 2-sPA execution wave (built + fired + integrated this session):**
+5. **sPA ss16 (PongAI) INTEGRATED** `6650f1eb` → main: C5 ctor-arg contextual typing · C4 `W-EQ-PAYLOAD-VARIANT` · C3 `W-RENDER-SHADOWED`. +2 §34 rows; sPA R26-verified.
+6. **sPA ss15 (render-collection) INTEGRATED** `1ff06eae` (3-way over ss16 stale-base) → main: tailwind-scoped-class lint · on-mount-render-slot · request-lift D1+D2 · §6.7.7 `${}`-migrate. sPA R26-verified.
+7. **flogence triage:** `bind:value` HIGH → **NOT-REPRODUCED** (stale dist; ack sent); `on mount {bareCall()}` → **REAL → fixed by ss15**.
 
-## Carried (now routed into the sPAs)
-PongAI C3/C4/C5 → ss16 · render-bridge D1/D2 → ss15 · on-mount → ss15 · CSS papercut → ss15. Other carried: A4/stdlib Phase 3 ruling · flogence raw-route (dpa-002) · external-backend follow-ons · g-tier1-ssr-prerender · 6nz AA (match-value-discard → reserved ss17) · g-server-fn-typed-object-literal (MED, not-root-caused — scope-first before sPA-able).
+## ⏸️ OPEN — next session (priority order)
+0. **⭐ GitHub issues from rjantz3 (Ryan) — FIRST external adopter reports, both HIGH-shaped, both with repros — TOP.** **#1** a server fn calling another server fn → `<callee> is not defined` at RUNTIME (the callee isn't in scope in the generated route module; the callee works ALONE — only the composed path breaks; `repro-composed.scrml`). **#2** v0.7.0 first-mutation-after-page-load → `403 CSRF validation failed` (double-submit token bootstrap race; the `scrml_csrf` cookie is set lazily on the first RPC; READS self-heal via `_scrml_fetch_with_csrf_retry`, but the first WRITE keeps 403-ing + never completes). Both R26-triage → fix. **`gh` is NOT installed** — use the public API: `curl https://api.github.com/repos/bryanmaclee/scrml/issues`. First real external adopter — high signal.
+1. **Part C ruling → cut pa-base v2.** §12 role taxonomy is DRAFTED (`pa-base/pa-base.md` + DISTILLATION-v2). 3 points await the user's ruling: (a) the PA-only-acts spine [sole authority+integrator; RUN-not-RATIFY/LAND-is-PA], (b) the transitional split [deputy mechanizes first; sPA/dPA stay agent-roles; PA irreducible], (c) cPA keep-or-fold. After ruling → **cut `pa-base v2`**: re-vendor cementer/PongAI/giti · vend 6nz (blocked on its live session) · tombstone the scrml-support `pa-base.md` copy.
+2. **giti `three-codegen-findings`** — UNPROCESSED inbox (`handOffs/incoming/2026-06-22-1443-giti-to-scrml-three-codegen-findings.md`), arrived mid-session. R26-triage next session (giti adopter reporting 3 codegen findings).
+3. **3 filed residuals (not fixed):** `g-control-flow-in-markup-lift-body-evades-diagnostic` (MED — `E-CONTROL-FLOW-IN-MARKUP` misses `lift`-bearing bodies) · `g-spec-677-example-not-and-eqnot-currency` (LOW) · `g-typer-render-call-not-in-builtin-allowlist` (LOW — bare `render()` spurious E-SCOPE-001). All sPA-surfaced; could cluster into a future ss17.
+4. **Carried:** A4/stdlib Phase 3 ruling · flogence raw-route (dpa-002) · external-backend follow-ons · g-tier1-ssr-prerender · 6nz AA (match-value-discard → reserved ss17).
 
-## Anomalies / lessons
-- **Live giti session in parallel** — its commits raced mine; explicit-pathspec saved it. giti push owned by that session.
-- **bind:value NOT-REPRODUCED** — a clean dogfood of the verify-before-claim doctrine I distilled this session (caught the ghost before wasting a dispatch).
-- **pa-base canonical RELOCATED** scrml-support → `scrmlMaster/pa-base/pa-base.md`; scrml-support copy = frozen v1 vendor-source, tombstone at the v2 cut.
+## Anomalies / lessons (this session)
+- **S205 gate TRIPPED once** (ss16 push: pushed before merging deputy-maint tick-181) → caught + recovered immediately (merged + re-pushed; no strand). Second push (ss15 wrap) merged deputy-FIRST — clean. The lesson is in the delta-log + I distilled it into vpa-base.
+- **ss15 stale-base** (branched off `1ce8de34`, before ss16 landed) → a naive merge would have shown ss16's files as deletions; the 3-way merge correctly preserved both (sPA pre-verified via `git merge-tree`). The S112/S140 lesson held.
+- **bind:value NOT-REPRODUCED** — clean dogfood of the verify-before-claim doctrine (caught a stale-dist ghost before wasting a dispatch).
+- **LIVE deputy + LIVE giti session** ran in parallel all session — explicit-pathspec commits + the merge-before-push gate kept them coherent.
 
 ## pa.md directives in force
-R1–R5 · `---` delimiter · Profile A · digest-first · S88/S99/S126 dispatch+path-discipline · S112 worktree-base · S136 BRIEF · S138 R26 (used heavily — the bind:value ghost) · S147 coherence · S199/S205 deputy + merge-before-push · S119 explicit-pathspec (used on the giti + scrml commits) · `feedback_no_batch_ratify_foundational_axioms` (pa-base Parts B/C are axiom — drafted, not batch-ratified).
+R1–R5 · `---` · Profile A · digest-first · S88/S99/S126 · S112 worktree-base (ss15 stale-base) · S136 BRIEF · S138 R26 (heavy) · S147 coherence · S199/S205 deputy + merge-before-push (tripped+recovered) · S119 explicit-pathspec · S140 3-way-merge-for-stale-base · wrap 8-step · `feedback_no_batch_ratify_foundational_axioms` (pa-base C is drafted-not-ratified).
 
 ## Tags
-#session-214 #open #pa-base-stood-up #vpa-base-distilled #deputy-less-until-need #giti-vended #scoped-css-verified #spa-ss15-ss16-built #flogence-bindvalue-not-reproduced #onmount-real
+#session-214 #close #pa-base-stood-up #v2-distillation-ABCD #deputy-less-until-need #giti-vended #scoped-css-verified #spa-ss15-ss16-integrated #flogence-triage #s205-gate-tripped-recovered
