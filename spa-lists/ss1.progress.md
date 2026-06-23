@@ -100,3 +100,19 @@ Branch: spa/ss1 · Worktree: ../scrml-spa-ss1 · provisioned off origin/main 72d
   * Same load-wiring no-op affects the `@`-form `server @x = ?{}` (W-AUTH-001 drops sqlNode) — load fix should cover both forms now they share sqlNode shape.
 - DEPENDENCY IMPACT: item 5 (E-RI-002 steers to `<engine server=@source>`) — that form now COMPILES but does NOT LOAD (W-AUTH-001). dpa-005 caveat "don't steer to a form that still codegen-fails" → item-5 disposition needs reconsideration (steer to fully-working channel+<match> Pattern A; qualify or omit the engine form until load-wiring lands). Decide at item 5.
 - spa/ss1 commit SHA recorded next.
+
+### ITEM 4 PARKED → ESCALATE TO PA [parked-escalate]
+- R4 SPEC cross-check (verify-before-claim; triage-genuine-needs-spec-crosscheck S129): the item is NOT a clean buildable bug-fix — it's an UN-RATIFIED design decision.
+  * dpa-002 (serve-side-raw-route-2026-06-23.md) is explicitly RUN-not-RATIFY / #advisory-not-ratified. Its "PA action requested" lists "resolve OQ-1's route= application-mode wiring" as a PA/user RATIFICATION — "The dPA does NOT ratify." No design-insight, no SPEC change ratifies it.
+  * SPEC §12 (L7017): "Route names are compiler-internal. The developer SHALL NOT reference, configure, or even observe the generated route names." (normative)
+  * SPEC §12.6 (L7102-7104): explicit `route=` retention is scoped to `--mode library` (the mount(server) host case, Insight 22). NOT application mode. The plumbing exists (parser/RI/emit-server honor explicitRoute) but app-mode emission is deliberately gated.
+  * Enabling author-`route=` on `server function*` in APP mode extends the library-mode exception into app mode, contra §12 "SHALL NOT configure" + Pillar-3 filesystem-routing (cf. E-PAGE-ROUTE-ATTR-FORBIDDEN — scrml DELIBERATELY forbids author routes on <page>).
+- ESCALATION: needs PA/user ratification of "does scrml allow author-declared `route=` on a server function* in application mode?" (the dpa-002 OQ-1, Pillar-3 "compiler owns the wiring" tension). The dpa-002 LEANS toward enabling it (Approach B + resolve OQ-1 as the shared minimal unblock) but defers ratification. sPA cannot ratify a feature touching a SPEC "SHALL NOT." Same escalation class as item 3. PARK + continue.
+- No code touched. Repro deferred to post-ratification dispatch.
+
+### ITEM 5 LANDED [landed-on-branch spa/ss1] — sPA-direct (message-only)
+- E-RI-002 message at route-inference.ts:3639-3645 replaced (blunt "move to a client-side callback" → dpa-005 targeted recipe): names the canonical server-authoritative patterns — `<engine for=T server=@source>` guard-free hydration (§51.0.E) AND `<channel>` cell + `<match for=T on=@cell>` (§38.4). Done sPA-direct (message-only change, low-risk; full-suite hook gates).
+- DEPENDENCY (item 3) RESOLVED-ENOUGH: list dependency was "land item 3 FIRST — <engine server=@source> only compiles once item 3 lands." Item 3's parser fix MADE `<engine server=@source>` COMPILE (R26 engine-rides: no E-CODEGEN-INVALID-JS) — the literal precondition is met. The diagnostic steers to a pattern that works: the source cell loads via the WORKING Pattern A/B (server-fn-call init, item-3 R26 control passed) + the fully-working channel+<match> form; it does NOT mandate the parked inline-?{} load. So the diagnostic is robust to the PA's eventual §52 ruling. dpa-005 line 242: "ship-now, independent of A/B/C."
+- Test: route-inference.test.js +1 (E-RI-002 message asserts server=@source/§51.0.E/<channel>/§38.4 + NOT "client-side callback"). 188→189 pass / 0 fail. No test asserted the old message text (only the code), so no breakage.
+- R26 (sPA): real `?{}` server fn writing @phase fires E-RI-002 with the new targeted text; old blunt steer gone.
+- spa/ss1 commit SHA recorded next.

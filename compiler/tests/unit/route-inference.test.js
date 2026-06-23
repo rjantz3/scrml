@@ -871,6 +871,30 @@ describe("§10 — E-RI-002: server-escalated function assigns to @reactive vari
     expect(riErrors[0].message).toContain("E-RI-002");
   });
 
+  test("E-RI-002 message steers to the canonical server-authoritative patterns (dpa-005, sPA ss1 item 5)", () => {
+    const fn = makeFunctionDecl({
+      name: "go",
+      isServer: true,
+      body: [
+        makeBareExpr("fetchData()"),
+        makeReactiveDecl("phase", "5"),
+      ],
+      spanStart: 10,
+    });
+    const fileAST = makeFileAST("/test/app.scrml", [fn]);
+    const { errors } = runRIClean([fileAST]);
+
+    const msg = errors.filter(e => e.code === "E-RI-002")[0]?.message ?? "";
+    // Targeted recipe (replaces the old blunt "move to a client-side callback"):
+    // names the <engine server=@source> hydration form (§51.0.E) AND the
+    // <channel>/<match> synced-cell form (§38.4).
+    expect(msg).toContain("server=@source");
+    expect(msg).toContain("§51.0.E");
+    expect(msg).toContain("<channel>");
+    expect(msg).toContain("§38.4");
+    expect(msg).not.toContain("client-side callback");
+  });
+
   test("E-RI-002 only fires on server-escalated functions, not client functions", () => {
     // A client function that assigns @reactive is fine (it's the expected pattern).
     const fn = makeFunctionDecl({

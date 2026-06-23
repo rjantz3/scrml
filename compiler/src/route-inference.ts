@@ -3638,9 +3638,13 @@ export function runRI(input: RIInput): RIOutput {
               errors.push(new RIError(
                 "E-RI-002",
                 `E-RI-002: Server-escalated function \`${record.fnNode.name ?? "<anonymous>"}\` ` +
-                `assigns to a \`@\` reactive variable. Reactive state is client-side; server ` +
-                `functions cannot mutate it directly. Move the reactive assignment to a client-side ` +
-                `callback, or restructure the function so the reactive mutation occurs on the client.`,
+                `assigns to a \`@\` reactive variable. Reactive state is client-side; a server ` +
+                `function has no client-reactive referent and cannot write it directly (§12.2). ` +
+                `For server-authoritative engine state, name a server-owned source cell the engine ` +
+                `hydrates from: \`<engine for=T server=@source ...>\` (§51.0.E — hydrates guard-free ` +
+                `on every change; client moves stay \`rule=\`-guarded). For a synced cell without ` +
+                `transition guards, write a \`<channel>\` cell (§38.4 — a server write lowers to a ` +
+                `broadcast) and derive a \`<match for=T on=@cell>\`. See §51.0.E + §38.4.`,
                 (reactiveAssignment as any).span ?? record.fnNode.span,
               ));
             }
