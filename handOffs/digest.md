@@ -1,9 +1,9 @@
-<!-- @digest head=2abeb37d delta-seq=34 -->
+<!-- @digest head=361589c9 delta-seq=38 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `2abeb37d`** + delta-log **[34]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `2abeb37d`
+> **HEAD `361589c9`** + delta-log **[38]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `361589c9`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,26 +13,27 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `2abeb37d`
-- **HIGH 1** · MED 14 · LOW 14 · Nominal 8
+## Board — from `@gap` tokens @ `361589c9`
+- **HIGH 1** · MED 13 · LOW 13 · Nominal 8
 - Named open HIGHs: `g-bindvalue-wiring-dropped-in-match-arm`
 
-## Recent rulings — last 4 `rule` (delta-log S215 — 2026-06-23)
+## Recent rulings — last 5 `rule` (delta-log S215 — 2026-06-23)
 - `[16]` state/rule · **S215 verification-doctrine RATIFIED → pa.md S215 addendum** (Part 1 adversarial-gate for non-PA fixes + Part 2 random-sample-10× audit, knobs: per-wrap cadenc… → pa-scrml.md
 - `[24]` rule · **dPA batch RATIFIED + in-Q DDs banked (user "Ok, lets go. tread softly, DD anything even at all in Q").** **dpa-004 RATIFIED** — SCOPED-RETIRE the S199 boundar… → dpa-queue.md + design-insights.md
 - `[25]` rule/state · **`_{}` design-conv (user) — "Inline all the way" RULED + dpa-009 banked.** dpa-003 narrowed to the INLINE value-returning form (`const out = _={…}=`) NOT the §… → dpa-queue.md
 - `[31]` find/rule · **Bug-51 fix S215-ADVERSARIAL-GATE run by PA-as-lander (`/code-review` 3-angle finder fan-out) — caught real adjacents; scary headline EMPIRICALLY REFUTED.** Fi… → known-gaps §S216 + /tmp/bug51-toenum
+- `[35]` rule · **§52 server-cell decl-RHS `?{}` = LOAD (Pattern C) RATIFIED (user "rule LOAD, ship param-free first").** Disposition A from the §52 DD. The "conflict" was narr… → design-insights + DD doc
 
 ## Recent activity — last 6 `disp`/`land`/`find`/`state`
-- `[29]` disp · **Bug-51 (Family B) fix DISPATCHED (user "fix it now").** scrml-js-codegen-engineer · isolation:worktree · opus · bg. Brief: emit page-local enum defs into the… → change-id giti-bug51-server-bundle-enum-emission-2026-06-23
-- `[30]` state · **S215 user-voice WRAP-LEFTOVER recovered + appended (user "the verbatim should be in the .claude sessions dir").** The S215 user-voice append was skipped at th… → user-voice-scrml.md
-- `[31]` find/rule · **Bug-51 fix S215-ADVERSARIAL-GATE run by PA-as-lander (`/code-review` 3-angle finder fan-out) — caught real adjacents; scary headline EMPIRICALLY REFUTED.** Fi… → known-gaps §S216 + /tmp/bug51-toenum
 - `[32]` disp · **Bug-51 follow-up DISPATCHED (collision guard + import-prune ordering + collision test).** scrml-js-codegen-engineer · isolation:worktree · opus · bg. FF-merge… → giti-bug51 change-id
 - `[33]` disp · **Half-1 convergence DISPATCHED (user "3 parallel go") — the g-bindvalue-wiring-dropped-in-match-arm HIGH, fix-once-covers-TWO (match arms + engine state-child… → change-id family-a-converge-half1-2026-06-23
 - `[34]` disp · **§52 server-cell-load-RHS SPEC-conflict DD DISPATCHED (escalation #1, user "3 parallel go").** scrml-deep-dive · bg → `scrml-support/docs/deep-dives/section52-… → §52 DD doc
+- `[36]` land · **ss1 RE-INTEGRATED to main (user "integrate ss1") — 4 items cherry-picked + combined-state re-baseline.** spa/ss1 (base 0d4ba428) cherry-picked onto main (Bug-… → main 96745d34
+- `[37]` land · **Family-A convergence HALF-1 DONE (e8de5d5e) — the g-bindvalue-wiring-dropped-in-match-arm HIGH, fix-once-covers-TWO.** Extracted root-agnostic `emitBindDirect… → branch e8de5d5e
+- `[38]` state · **3 intakes + a dPA verdict + §52-fix dispatch.** (1) giti REPLIED — **Bug-51 VERIFIED fixed** (7 pages compile, server bundles carry enum defs, SSE 3 frames, l… → known-gaps + dpa-queue + §52 change-id
 
 ## State
-- Version: 0.7.0 · maps: 8 commits behind HEAD (watermark a2137214, HEAD 2abeb37d)
+- Version: 0.7.0 · maps: 12 commits behind HEAD (watermark a2137214, HEAD 361589c9)
 - Recent wraps:
   - a2137214 chore(s215): wrap-finalize — recent-sessions + digest regen at settled HEAD 27900a6c
   - cab2cca0 wrap(s214): integrate sPA ss15 + close — render-collection cluster + reconciliation
