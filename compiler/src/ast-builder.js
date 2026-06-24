@@ -5239,6 +5239,32 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   }
 
   /**
+   * dpa-003 (S216) — inline foreign-code initializer. When a const/let/return
+   * RHS is a `_={ … }=` foreign BLOCK_REF, build the ForeignBlock node and
+   * return it. Caller attaches it as `foreignNode` on the decl node and sets
+   * `init: ""`, so emit-logic routes through `case "foreign"` (mirrors the
+   * `sqlNode` attachment for `?{}`). Returns null (no tokens consumed) on no
+   * match — caller MUST fall through to the legacy collectExpr path. The
+   * optional trailing `;` is consumed here on a match.
+   */
+  function tryConsumeForeignInit() {
+    const next = peek();
+    if (!(next && next.kind === "BLOCK_REF" && next.block && next.block.type === "foreign")) {
+      return null;
+    }
+    const refTok = consume(); // consume the BLOCK_REF
+    const childNode = buildBlock(refTok.block, filePath, parentBlock.type, counter, errors);
+    if (!childNode || childNode.kind !== "foreign") {
+      // Defensive: BS contract guarantees BLOCK_REF.block.type === "foreign"
+      // means buildBlock returns a foreign node. If that breaks, the BLOCK_REF
+      // is already consumed; null here would hole the token stream. Best-effort.
+      return null;
+    }
+    if (peek().kind === "PUNCT" && peek().text === ";") consume();
+    return childNode;
+  }
+
+  /**
    * Phase A1a Step 2 — V5-strict structural state-decl recognition.
    * Phase A1a Step 5 — extended for Shape 2 (decl-with-spec): markup-RHS
    * detection + bareword/call-form validators between IDENT and `>`.
@@ -6916,6 +6942,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         if (_sqlInitLet) {
           return { id: ++counter.next, kind: "let-decl", name, init: "", sqlNode: _sqlInitLet, ...(typeAnnotation ? { typeAnnotation } : {}), span: spanOf(startTok, peek()) };
         }
+        const _foreignInitLet = tryConsumeForeignInit();
+        if (_foreignInitLet) {
+          return { id: ++counter.next, kind: "let-decl", name, init: "", foreignNode: _foreignInitLet, ...(typeAnnotation ? { typeAnnotation } : {}), span: spanOf(startTok, peek()) };
+        }
         const { expr, span } = collectExpr();
         // §19.5: `let x = fallible()?` — propagate-expr binding
         const strippedLet = expr.trimEnd();
@@ -7017,6 +7047,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const _sqlInitConst = tryConsumeSqlInit();
         if (_sqlInitConst) {
           return { id: ++counter.next, kind: "const-decl", name, init: "", sqlNode: _sqlInitConst, ...(typeAnnotation ? { typeAnnotation } : {}), span: spanOf(startTok, peek()) };
+        }
+        // dpa-003 (S216): `const x = _={ … }=` — inline foreign-code init.
+        const _foreignInitConst = tryConsumeForeignInit();
+        if (_foreignInitConst) {
+          return { id: ++counter.next, kind: "const-decl", name, init: "", foreignNode: _foreignInitConst, ...(typeAnnotation ? { typeAnnotation } : {}), span: spanOf(startTok, peek()) };
         }
         const { expr, span } = collectExpr();
         // §19.5: `const x = fallible()?` — propagate-expr binding. Mirrors the
@@ -7652,6 +7687,26 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           };
         }
         // Defensive: child wasn't SQL — fall through to legacy path.
+      }
+      // dpa-003 (S216): `return _={ … }=` — inline foreign-code at return
+      // position. Mirror the `return ?{...}` SQL hook above: build the
+      // ForeignBlock and attach it as `foreignNode`; emit-logic case
+      // "return-stmt" routes through case "foreign" when foreignNode is present.
+      if (next && next.kind === "BLOCK_REF" && next.block && next.block.type === "foreign") {
+        for (let _k = 0; _k < lookAhead; _k++) consume();
+        const refTok = consume(); // consume the BLOCK_REF
+        const childNode = buildBlock(refTok.block, filePath, parentBlock.type, counter, errors);
+        if (childNode && childNode.kind === "foreign") {
+          if (peek().kind === "PUNCT" && peek().text === ";") consume();
+          return {
+            id: ++counter.next,
+            kind: "return-stmt",
+            expr: "",
+            foreignNode: childNode,
+            span: spanOf(startTok, peek()),
+          };
+        }
+        // Defensive: child wasn't foreign — fall through.
       }
       // Bug 67 (S157) — match-as-expression at return position:
       //   `return match expr { .A => "a" .B => "b" }`
@@ -15581,7 +15636,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
       const _ppBodyOffset = block.span.start + _ppBodyShift;
       const _rawBody = block.raw.slice(prefixLen, block.raw.length - 1);
       const _childBlocksForPP = Array.isArray(block.children) ? block.children : [];
-      const _BLOCKREF_PP_TYPES = new Set(["logic", "sql", "css", "error-effect", "meta"]);
+      const _BLOCKREF_PP_TYPES = new Set(["logic", "sql", "css", "error-effect", "meta", "foreign"]);
       const _childRanges = [];
       for (const _c of _childBlocksForPP) {
         if (!_c || !_BLOCKREF_PP_TYPES.has(_c.type) || !_c.span) continue;
@@ -15656,7 +15711,11 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
       // SPEC §40.8 default-logic-mode.
       let _liveChildren = block.children;
       if (block._synthetic === true && (!_liveChildren || _liveChildren.length === 0)) {
-        const _hasSigilBlock = /[\$?#!\^~](?:=*\{)/.test(bodyRaw);
+        const _hasSigilBlock = /[\$?#!\^~](?:=*\{)/.test(bodyRaw)
+          // dpa-003 (S216) — a foreign opener `_={`/`_{` (preceded by a
+          // non-identifier char) also triggers the re-split so the BS
+          // builds the `foreign` child block + tokenizeLogic emits its BLOCK_REF.
+          || /(?:^|[^A-Za-z0-9_$])_=*\{/.test(bodyRaw);
         if (_hasSigilBlock) {
           const _wrappedSrc = "${" + bodyRaw + "}";
           const _subResult = _splitBlocksForP2Form1(filePath, _wrappedSrc);
@@ -15801,6 +15860,49 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
     }
 
     // --------------------------------------------------------------- sql
+    // ----------------------------------------------------------- foreign (_={}=)
+    case "foreign": {
+      // dpa-003 (S216) — inline value-returning `_={ … }=` foreign-code block.
+      // SPEC §23.2.2: produce the ForeignBlock node (the FIRST producer of it).
+      // The interior is OPAQUE (§23.2.3): we do NOT tokenize/parse the slice
+      // body — it is verbatim ts/js. We DO parse the OPTIONAL leading
+      // `in: { name, name }` crossing header (dpa-003 RATIFIED capture syntax),
+      // because those names become the IIFE params at codegen and are the ONLY
+      // values that cross into the opaque slice (no free lexical capture).
+      //
+      // block.raw is `_` + level `=` + `{` + <interior> + `}` + level `=`.
+      // The BS stored `foreignLevel`; default 0 if absent.
+      const level = typeof block.foreignLevel === "number" ? block.foreignLevel : 0;
+      const openerLen = 1 + level + 1;       // `_` + `=`*level + `{`
+      const closerLen = 1 + level;           // `}` + `=`*level
+      const interior = block.raw.slice(openerLen, block.raw.length - closerLen);
+
+      // Parse an optional leading `in: { a, b }` crossing header.
+      // crossings[] = the named values crossing IN. sliceBody = interior with
+      // the header removed (verbatim foreign code).
+      let crossings = [];
+      let sliceBody = interior;
+      const headerMatch = /^\s*in\s*:\s*\{([^}]*)\}/.exec(interior);
+      if (headerMatch) {
+        crossings = headerMatch[1]
+          .split(",")
+          .map((n) => n.trim())
+          .filter((n) => n.length > 0);
+        sliceBody = interior.slice(headerMatch[0].length);
+      }
+
+      return {
+        id: ++counter.next,
+        kind: "foreign",          // ForeignBlock (§23.2.2)
+        level,
+        lang: null,               // resolved downstream from ancestor <program lang=> (§23.2.1)
+        raw: interior,            // verbatim slice between opener and closer (incl. header)
+        body: sliceBody,          // verbatim foreign code (header stripped) — what codegen splices
+        crossings,                // the `in:{}` named values that cross IN (NO free lexical capture)
+        span,
+      };
+    }
+
     case "sql": {
       const bodyRaw = block.raw.slice(2, block.raw.length - 1);
       const bodyOffset = block.span.start + 2;

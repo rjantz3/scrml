@@ -8653,6 +8653,23 @@ function annotateNodes(
             resolvedType = resolveSqlRowType(_letSqlNode, _letSqlSpan);
           }
         }
+        // dpa-003 (S216) — `let/const x = _={ … }=` foreign-init. The OUT value
+        // is an UNOWNED foreign value: it defaults to `asIs` (§14.7, the named
+        // hatch §14.1.1 designates for "a foreign value"), NOT inferred from the
+        // opaque ts/js slice (A3 eliminated — that would reverse the §23.2.3
+        // opacity contract). A call-site annotation (`const out: T = _={…}=`)
+        // states intent and OVERRIDES this default via the `letAnnot` block
+        // below; a `parseVariant` (§41.13) decode discharges the `asIs`
+        // obligation (E-TYPE-030) for non-trivial shapes — the same
+        // annotate-AND-decode the `<api>` unowned boundary ships (§60.2/§60.5).
+        // The default is already `tAsIs()`; this is the explicit honesty marker
+        // (no inference from the foreign side), parallel to the sqlNode block.
+        {
+          const _foreignNode = (n as Record<string, unknown>).foreignNode as ASTNodeLike | undefined;
+          if (_foreignNode && _foreignNode.kind === "foreign") {
+            resolvedType = tAsIs();
+          }
+        }
         // §53.4 — If a type annotation is present and predicated, classify the assignment zone.
         const letAnnot = (n as ASTNodeLike).typeAnnotation as string | undefined;
         if (letAnnot) {
@@ -18551,6 +18568,132 @@ function walkAndExpandTableForNodes(
 // escalate to a server placement — there is no §12.2 trigger here and this
 // pass adds none. (route-inference.ts already excludes `<api>`; a confirming
 // test asserts an `<api>`-only app emits a pure client bundle.)
+/**
+ * dpa-003 (S216) — inline `_={ … }=` foreign-code OUT validation.
+ *
+ * The §23.2.2 ForeignBlock is OPAQUE (§23.2.3): the typer does NOT type-check
+ * its interior. This pass enforces the LANGUAGE gate for the INLINE
+ * value-returning form (the only form codegen now lowers):
+ *   - E-FOREIGN-003 — no `lang=` on any ancestor `<program>` (§23.2.1).
+ *   - E-FOREIGN-005 — an inline value-returning `_={}` whose resolved `lang=`
+ *     is NOT `ts`/`js` (arbitrary-lang inline value-flow has no defined runtime
+ *     model — dpa-009 territory; use `use foreign:` for sidecars). ts/js cross
+ *     NATIVELY (same Bun runtime, no marshaling); other langs do not.
+ *
+ * Resolves the file's program `lang=` (closest ancestor `<program lang=>`; for
+ * the flat file-AST shape the top-level `<program>` is the host). Stamps the
+ * resolved `lang` onto each foreign node so codegen / downstream can read it.
+ *
+ * NOTE: the BARE (non-value-returning, non-server-fn-body) arbitrary-context
+ * `_{}` stays E-FOREIGN-004 (the §23.2.4 amendment admits ONLY the inline
+ * value-returning server-fn-body form; this pass governs the admitted form).
+ */
+function resolveProgramLang(fileAST: FileAST): string | null {
+  const nodes = (fileAST.nodes as ASTNodeLike[] | undefined)
+    ?? ((fileAST.ast as FileAST | undefined)?.nodes as ASTNodeLike[] | undefined)
+    ?? [];
+  const programNode = nodes.find(
+    (node: ASTNodeLike) => node.kind === "markup" && (node as ASTNodeLike).tag === "program",
+  );
+  if (!programNode) return null;
+  const attrs = (programNode as ASTNodeLike).attrs as Array<{ name: string; value: unknown }> | undefined;
+  if (!attrs) return null;
+  const langAttr = attrs.find((a) => a.name === "lang");
+  if (!langAttr) return null;
+  const v = langAttr.value as unknown;
+  // The attr value is a string-literal AST node (`{ kind, value }`) or a bare
+  // string depending on the form. Extract the underlying string in both shapes.
+  let raw: string | null = null;
+  if (typeof v === "string") raw = v;
+  else if (v && typeof v === "object" && typeof (v as { value?: unknown }).value === "string") {
+    raw = (v as { value: string }).value;
+  }
+  return raw === null ? null : raw.replace(/^["']|["']$/g, "").trim();
+}
+
+function checkForeignBlocks(
+  nodes: ASTNodeLike[],
+  programLang: string | null,
+  errors: TSError[],
+  fileSpan: Span,
+): void {
+  const FOREIGN_INLINE_LANGS = new Set(["ts", "js"]);
+
+  // Pass 1 — collect the ADMITTED foreign nodes: those attached as a `foreignNode`
+  // on a const/let-decl or a return-stmt. THAT is the inline VALUE-RETURNING form
+  // the §23.2.4 amendment admits (dpa-003). A bare `kind: "foreign"` statement
+  // (not bound, not returned) is the non-value-returning form → still E-FOREIGN-004.
+  const admitted = new Set<unknown>();
+  const collectAdmitted = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    const n = node as Record<string, unknown>;
+    if (n.foreignNode && (n.foreignNode as ASTNodeLike).kind === "foreign") {
+      admitted.add(n.foreignNode);
+    }
+    for (const k of Object.keys(n)) {
+      if (k === "span") continue;
+      const v = n[k];
+      if (Array.isArray(v)) for (const c of v) collectAdmitted(c);
+      else if (v && typeof v === "object") collectAdmitted(v);
+    }
+  };
+  for (const node of nodes) collectAdmitted(node);
+
+  // Pass 2 — walk every foreign node once. Admitted (value-returning) nodes get
+  // the lang gate (E-FOREIGN-003 / E-FOREIGN-005) + a lang stamp; bare nodes get
+  // E-FOREIGN-004 (the non-value-returning form is not yet admitted).
+  const fired = new Set<unknown>();
+  const visit = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    const n = node as Record<string, unknown>;
+    if (n.kind === "foreign" && !fired.has(n)) {
+      fired.add(n);
+      const foreign = n as ASTNodeLike;
+      const span = (foreign.span as Span | undefined) ?? fileSpan;
+      if (!admitted.has(foreign)) {
+        // Non-value-returning bare `_{}` — not admitted by the §23.2.4 amendment.
+        errors.push(new TSError(
+          "E-FOREIGN-004",
+          "E-FOREIGN-004: a bare (non-value-returning) `_={ … }=` foreign-code " +
+          "block is not valid here. The admitted inline form binds the block's " +
+          "value: `const out = _={ … }=` (or `return _={ … }=`) in a server " +
+          "`function` body (\u00a723.2.4). For a standalone foreign sidecar, use " +
+          "`use foreign:` (\u00a723.4).",
+          span,
+        ));
+      } else {
+        // Stamp the resolved lang for codegen / downstream consumers.
+        (foreign as Record<string, unknown>).lang = programLang;
+        if (!programLang) {
+          errors.push(new TSError(
+            "E-FOREIGN-003",
+            "E-FOREIGN-003: foreign code block has no `lang=` declaration in any " +
+            "ancestor `<program>` (\u00a723.2.1). Add lang=\"ts\" (or \"js\") to the " +
+            "enclosing `<program>` to declare the inline foreign-code language.",
+            span,
+          ));
+        } else if (!FOREIGN_INLINE_LANGS.has(programLang)) {
+          errors.push(new TSError(
+            "E-FOREIGN-005",
+            `E-FOREIGN-005: inline value-returning \`_={ … }=\` foreign code is ` +
+            `supported only for \`lang="ts"\`/\`"js"\` (resolved lang: \`${programLang}\`). ` +
+            `Arbitrary-language inline value-flow has no defined runtime model yet — ` +
+            `use a \`use foreign:\` sidecar (§23.4) for an out-of-process \`${programLang}\` service.`,
+            span,
+          ));
+        }
+      }
+    }
+    for (const k of Object.keys(n)) {
+      if (k === "span") continue;
+      const v = n[k];
+      if (Array.isArray(v)) for (const c of v) visit(c);
+      else if (v && typeof v === "object") visit(v);
+    }
+  };
+  for (const node of nodes) visit(node);
+}
+
 function checkApiDeclarations(
   topNodes: ASTNodeLike[],
   typeRegistry: Map<string, ResolvedType>,
@@ -19476,6 +19619,14 @@ function processFile(
       }
     }
     checkApiDeclarations(allNodes, typeRegistry, apiExemptTypeNames, errors, fileSpan);
+  }
+
+  // dpa-003 (S216) — inline `_={ … }=` foreign-code lang gate (E-FOREIGN-003 /
+  // E-FOREIGN-005) + lang stamp. Runs on every file (the foreign walk is a no-op
+  // when there are no foreign nodes).
+  {
+    const _foreignProgramLang = resolveProgramLang(fileAST);
+    checkForeignBlocks(allNodes, _foreignProgramLang, errors, fileSpan);
   }
 
   // Assemble TypedFileAST.

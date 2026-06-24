@@ -812,7 +812,8 @@ export function splitBlocks(filePath, source) {
     return f !== null && (
       f.type === "logic" || f.type === "sql" ||
       f.type === "css" || f.type === "error-effect" ||
-      f.type === "meta" || f.type === "test"
+      f.type === "meta" || f.type === "test" ||
+      f.type === "foreign"   // dpa-003 (S216) — `_={ … }=` opaque brace context
     );
   }
 
@@ -2014,6 +2015,59 @@ export function splitBlocks(filePath, source) {
   }
 
   /**
+   * Match a foreign-code opener `_` + zero-or-more `=` + `{` at position `p`
+   * (SPEC §23.2: "`_` followed by zero or more `=` followed by `{`"). Returns
+   * the level (count of `=`) on a match, or -1 on no match. The `_` must NOT be
+   * the tail of a longer JS identifier (so `foo_{` / `a_={` never match) — the
+   * preceding char must be a non-identifier char (or start-of-input). This is
+   * the load-bearing guard that keeps `_ = {` (the spaced assignment) and an
+   * ordinary `_underscoreVar` from being misread as a foreign opener: `_ = {`
+   * has a SPACE after `_` so it fails the `=`*`{` shape, and an identifier like
+   * `my_` has an identifier char before `_`.
+   */
+  function matchForeignOpener(p) {
+    if (source[p] !== "_") return -1;
+    const prev = p > 0 ? source[p - 1] : "";
+    // `_` preceded by an identifier char is a mid-identifier underscore, not an
+    // opener (e.g. `my_var`, `__proto__`). Allow start-of-input, whitespace,
+    // and punctuation (`=`, `(`, `,`, `{`, etc.) before the `_`.
+    if (prev && /[A-Za-z0-9_$]/.test(prev)) return -1;
+    let q = p + 1;
+    let level = 0;
+    while (source[q] === "=") { level++; q++; }
+    if (source[q] !== "{") return -1;
+    return level;
+  }
+
+  /**
+   * Push a foreign-code (`_={ … }=`) brace context (SPEC §23.2, dpa-003 S216).
+   * `level` is the count of `=` markers in the opener (`_{`=0, `_={`=1, …),
+   * stored as `foreignLevel` so the main-loop opaque scanner closes only on a
+   * `}` followed by EXACTLY `level` `=` characters. `openPos` is the position
+   * of the leading `_` so the captured raw slice includes the full opener.
+   */
+  function pushForeignContext(level, openPos, openLine, openCol) {
+    const parentFrame = topFrame();
+    const inheritedTagNesting = (parentFrame && parentFrame.tagNesting != null)
+      ? parentFrame.tagNesting : 0;
+    stack.push({
+      type: "foreign",
+      name: null,
+      depth: stack.length,
+      startPos: openPos,
+      startLine: openLine,
+      startCol: openCol,
+      children: [],
+      braceDepth: 1,
+      foreignLevel: level,
+      tagNesting: inheritedTagNesting,
+      _inDouble: false,
+      _inSingle: false,
+      _inBacktick: false,
+    });
+  }
+
+  /**
    * Push a markup/state context frame. The tag opener (through '>') has been consumed.
    *
    * `openerHadSpaceAfterLt` (P1, SPEC §4.3 / §15.15.5): records whether the opener
@@ -2059,6 +2113,12 @@ export function splitBlocks(filePath, source) {
     // the AST builder can decide whether a BLOCK_REF is a statement boundary.
     if (frame.tagNesting > 0) {
       block.tagNesting = frame.tagNesting;
+    }
+    // dpa-003 (S216) — carry the foreign opener level (`_{`=0, `_={`=1, …) so
+    // buildBlock's `case "foreign"` slices the right opener/closer width and
+    // emit-logic emits a level-correct ForeignBlock.
+    if (frame.type === "foreign") {
+      block.foreignLevel = frame.foreignLevel || 0;
     }
     targetChildren().push(block);
   }
@@ -2281,6 +2341,41 @@ export function splitBlocks(filePath, source) {
       const frame = topFrame();
 
       // -----------------------------------------------------------------------
+      // Foreign-code (`_={ … }=`) OPAQUE scan (SPEC §23.2 / §23.2.3).
+      //
+      // dpa-003 (S216) — inline value-returning `_{}` in a logic context. The
+      // interior of a `_{}` block is OPAQUE (§23.2.3 "TAB does NOT tokenize
+      // interior"; the compiler SHALL NOT parse/tokenize/type-check it). So we
+      // do NOT run the generic `{`/`}` brace-depth tracking or any sigil
+      // detection inside a foreign frame — a `{` inside a foreign string
+      // literal or comment must not affect the close. The ONLY thing that
+      // closes a foreign block is the LEVEL-AWARE closer: a `}` followed by
+      // EXACTLY `frame.foreignLevel` `=` characters (§23.2 normative). The
+      // verbatim raw slice is captured by popBraceContext's source.slice.
+      // -----------------------------------------------------------------------
+      if (frame.type === "foreign") {
+        const lvl = frame.foreignLevel || 0;
+        if (c === "}") {
+          // Peek for `}` + exactly `lvl` `=` chars (level-aware closer).
+          let eq = 0;
+          while (eq < lvl && source[curPos + 1 + eq] === "=") eq++;
+          // A trailing `=` beyond the level would be `}===…` — still closes at
+          // `lvl` (the §23.2 rule is "the same number of `=` as the opener").
+          if (eq === lvl) {
+            flushText();
+            advance(1 + lvl); // consume `}` + the level `=` markers
+            popBraceContext();
+            continue;
+          }
+        }
+        // Any other character (including `{`, `}` not at the level closer,
+        // quotes, sigils) is opaque foreign content — consume verbatim.
+        beginText();
+        step();
+        continue;
+      }
+
+      // -----------------------------------------------------------------------
       // Backtick template literal tracking inside meta (^{}) contexts.
       //
       // Without this, `${...}` inside template literals like emit(`<div>${x}</div>`)
@@ -2413,6 +2508,20 @@ export function splitBlocks(filePath, source) {
       // Nested brace-delimited openers.
       // Inside double/single quoted strings, ${ ?{ etc. are literal text and
       // must NOT push a new context.
+      //
+      // Foreign-code opener `_={ … }=` (SPEC §23.2, dpa-003 S216) — recognized
+      // FIRST so a `_={` is not misread as `_ = {` (identifier + assign +
+      // object). The opaque-interior scan above (frame.type === "foreign")
+      // then owns everything until the level-aware `}=` closer.
+      if (!_inBraceStr) {
+        const _fLvl = matchForeignOpener(curPos);
+        if (_fLvl >= 0) {
+          flushText();
+          advance(1 + _fLvl + 1); // `_` + level `=` + `{`
+          pushForeignContext(_fLvl, curPos, curLine, curCol);
+          continue;
+        }
+      }
       if (!_inBraceStr && c === "$" && ch(1) === "{") {
         flushText();
         advance(2);
@@ -2668,6 +2777,36 @@ export function splitBlocks(filePath, source) {
         flushText();
         advance(2);
         pushBraceContext("test", curPos, curLine, curCol);
+        continue;
+      }
+    }
+
+    // dpa-003 (S216) — a foreign opener `_=*{` inside an orphan-brace body
+    // (a function body destined for the BARE_DECL_RE lift) must be skipped
+    // OPAQUELY to its level-aware `}=` closer (NOT counted as orphan braces).
+    // The slice interior is opaque ts/js (§23.2.3); an embedded `}` / `}=` /
+    // unbalanced brace inside a string or comment in the slice would otherwise
+    // corrupt the orphanBraceDepth counter (E-CTX-001 on the real closer). We
+    // consume the whole `_{ … }=` as raw text; the lift then wraps the body in
+    // `${...}` and the re-split (ast-builder.js) builds the proper foreign
+    // child. Only fires inside an orphan-brace body (the pre-lift fn body); at
+    // depth 0 (markup direct child) the existing sidecar handling is untouched.
+    if (orphanBraceDepth > 0 && !topIsBraceContext()) {
+      const _fLvlOrphan = matchForeignOpener(curPos);
+      if (_fLvlOrphan >= 0) {
+        const lvl = _fLvlOrphan;
+        beginText();
+        advance(1 + lvl + 1); // `_` + level `=` + `{`
+        // Scan to the level-aware closer `}` + lvl `=`, treating everything as
+        // opaque (a brace inside a string/comment does not close).
+        while (pos < len) {
+          if (source[pos] === "}") {
+            let eq = 0;
+            while (eq < lvl && source[pos + 1 + eq] === "=") eq++;
+            if (eq === lvl) { advance(1 + lvl); break; }
+          }
+          step();
+        }
         continue;
       }
     }

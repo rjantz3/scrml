@@ -1734,6 +1734,19 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         }
         return `let ${_letDeclLhs}; // SQL-init for ${_letDeclLhs} — client cannot evaluate _scrml_sql (E-CG-006); use a server-side function.`;
       }
+      // dpa-003 (S216): `let x = _={ … }=` — inline foreign-code init. Mirror of
+      // the sqlNode handling: recurse into case "foreign" and strip the trailing
+      // `;` so the result becomes the RHS. Server-only (the slice is opaque ts/js
+      // run server-side); the fn is RI-classified server when it carries a
+      // foreign node, so the server branch is the live path.
+      if ((node as any).foreignNode && (node as any).foreignNode.kind === "foreign") {
+        if (opts.boundary === "server") {
+          const fStmt = emitLogicNode((node as any).foreignNode, opts);
+          const fExpr = fStmt.replace(/;\s*$/, "");
+          return `let ${_letDeclLhs} = ${fExpr};`;
+        }
+        return `let ${_letDeclLhs}; // foreign-init for ${_letDeclLhs} — _{} runs server-side; use a server-side function.`;
+      }
       // Phase 3 fast path: when initExpr is present, skip all string splitting/merging
       if (node.initExpr) {
         const rhs = emitExpr(node.initExpr, _makeExprCtx(opts));
@@ -1839,6 +1852,16 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         // have an initializer) + comment so the JS parses and the cause is
         // visible.
         return `const ${_constDeclLhs} = null; // SQL-init for ${_constDeclLhs} — client cannot evaluate _scrml_sql (E-CG-006); use a server-side function.`;
+      }
+      // dpa-003 (S216): `const x = _={ … }=` — inline foreign-code init. Mirror
+      // of the sqlNode handling above.
+      if (node.kind === "const-decl" && (node as any).foreignNode && (node as any).foreignNode.kind === "foreign") {
+        if (opts.boundary === "server") {
+          const fStmt = emitLogicNode((node as any).foreignNode, opts);
+          const fExpr = fStmt.replace(/;\s*$/, "");
+          return `const ${_constDeclLhs} = ${fExpr};`;
+        }
+        return `const ${_constDeclLhs} = null; // foreign-init for ${_constDeclLhs} — _{} runs server-side; use a server-side function.`;
       }
       // Phase 3 fast path: when initExpr is present, skip all string splitting/merging
       if (node.initExpr) {
@@ -2721,6 +2744,75 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         }
       }
       return emitLiftExpr(node);
+    }
+
+    case "foreign": {
+      // dpa-003 (S216) — inline value-returning `_={ … }=` foreign-code block.
+      // SPEC §23.2 / §13180: codegen wraps the OPAQUE verbatim slice in an
+      // async IIFE so its settled value flows back to the enclosing scrml
+      // expression with the await INJECTED at the boundary (no source-level
+      // await needed on the scrml side — mirrors `case "sql"`). The `in:{}`
+      // crossing names become the IIFE params and are called with the same-named
+      // enclosing locals — the ONLY values that cross (no free lexical capture).
+      //
+      // ts/js ONLY (the value crosses NATIVELY — same Bun runtime, no
+      // marshaling). A non-ts/js `lang=` is rejected upstream (E-FOREIGN-005,
+      // type-system.ts) before reaching codegen. The slice is server-only; RI
+      // classifies any fn containing a foreign node as a server fn, so this
+      // arm only runs on the server boundary.
+      const slice: string = ((node as any).body ?? (node as any).raw ?? "").trim();
+      const crossings: string[] = Array.isArray((node as any).crossings)
+        ? (node as any).crossings
+        : [];
+      const params = crossings.join(", ");
+      const argList = crossings.join(", ");
+      // The slice is verbatim foreign ts/js. Value-flow rule (§23.2.4a):
+      //   - SINGLE EXPRESSION (no top-level `;` statement separator and no
+      //     top-level `return`) — the canonical dispatcher shape, e.g.
+      //     `await new Response(...).text()`. Wrap as `return (slice)` so the
+      //     value flows back (the artifact's emitted sketch).
+      //   - Otherwise (the slice has a top-level `return`, OR it is a
+      //     multi-statement body) — splice VERBATIM. The author owns value-flow
+      //     via their own `return`; a body without one yields `undefined`
+      //     (honest — they wrote statements, not a value expression).
+      //
+      // The scan is brace/paren/bracket-depth-aware and skips string and comment
+      // spans so a nested `return` (inside an arrow/closure) or a `;` inside a
+      // string/`for(;;)` is NOT mistaken for a top-level statement boundary. This
+      // is a SYNTACTIC scan over the opaque slice (no parse) — it never
+      // type-checks or rewrites the interior (§23.2.3 opacity preserved).
+      const scanForeignSliceShape = (src: string): { topLevelReturn: boolean; topLevelStmtSep: boolean } => {
+        let depth = 0;          // () [] {} nesting
+        let parenForDepth = 0;  // track `for(` so its `;` are not statement seps
+        let inS = "", esc = false, inLine = false, inBlock = false, inTpl = false;
+        let topLevelReturn = false, topLevelStmtSep = false;
+        const isWord = (ch: string) => /[A-Za-z0-9_$]/.test(ch);
+        for (let i = 0; i < src.length; i++) {
+          const ch = src[i], nx = src[i + 1];
+          if (inLine) { if (ch === "\n") inLine = false; continue; }
+          if (inBlock) { if (ch === "*" && nx === "/") { inBlock = false; i++; } continue; }
+          if (inS) { if (esc) esc = false; else if (ch === "\\") esc = true; else if (ch === inS) inS = ""; continue; }
+          if (inTpl) { if (esc) esc = false; else if (ch === "\\") esc = true; else if (ch === "`") inTpl = false; continue; }
+          if (ch === "/" && nx === "/") { inLine = true; i++; continue; }
+          if (ch === "/" && nx === "*") { inBlock = true; i++; continue; }
+          if (ch === '"' || ch === "'") { inS = ch; continue; }
+          if (ch === "`") { inTpl = true; continue; }
+          if (ch === "(" || ch === "[" || ch === "{") { depth++; continue; }
+          if (ch === ")" || ch === "]" || ch === "}") { depth--; if (parenForDepth && depth < parenForDepth) parenForDepth = 0; continue; }
+          if (depth === 0) {
+            if (ch === ";") { topLevelStmtSep = true; continue; }
+            // `return` keyword at top level (whole-word).
+            if (ch === "r" && src.slice(i, i + 6) === "return" && !isWord(src[i - 1] ?? "") && !isWord(src[i + 6] ?? "")) {
+              topLevelReturn = true;
+            }
+          }
+        }
+        return { topLevelReturn, topLevelStmtSep };
+      };
+      const { topLevelReturn, topLevelStmtSep } = scanForeignSliceShape(slice);
+      const singleExpression = !topLevelReturn && !topLevelStmtSep;
+      const inner = singleExpression ? `return (${slice});` : slice;
+      return `await (async (${params}) => { ${inner} })(${argList});`;
     }
 
     case "sql": {

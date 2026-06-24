@@ -13182,7 +13182,7 @@ Parallel shape to other "what scrml is NOT" rules:
 
 These three codes operate at the parse layer; the fn-specific instance (§48.3.5 / E-FN-005) is preserved for diagnostic specificity inside `fn` bodies but is now subordinate to the language-wide rule of this section.
 
-**JS-host interop boundary.** When a JavaScript Promise crosses the boundary into a scrml variable (via `^{}` meta-block escape, `_{}` foreign-code block, server-function return type, or a `use foreign:` import), the body-split / CPS machinery handles the await-equivalent at the boundary — the scrml-side code reads the resolved value, no source-level `await` is needed. This mirrors the §42.9 null-normalisation pattern: the JS-side mechanism is bounded at the boundary; the scrml-side surface is uniform.
+**JS-host interop boundary.** When a JavaScript Promise crosses the boundary into a scrml variable (via `^{}` meta-block escape, `_{}` foreign-code block — the inline value-returning ts/js form, §23.2.4a — server-function return type, or a `use foreign:` import), the body-split / CPS machinery handles the await-equivalent at the boundary — the scrml-side code reads the resolved value, no source-level `await` is needed. This mirrors the §42.9 null-normalisation pattern: the JS-side mechanism is bounded at the boundary; the scrml-side surface is uniform.
 
 **Generators (`yield` / `yield*` / `function*`).** NOT covered by this rule. Generators are full language vocabulary in scrml — ratified S131 HU-4 Q-W3-3; normative policy at §13.6. The native parser preserves `yield` / `yield*` operators, the `function*` form, and object-literal generator-method shape. The asymmetry — generators admitted while `async`/`await` is forbidden — is justified by the local-not-viral property of generator-ness: a generator's coloring terminates at the function boundary on the consumer side (callers consume via plain iteration without re-coloring themselves), whereas `async`/`await` propagates the coloring up the call stack indefinitely. See §13.6 for the full rationale.
 
@@ -15583,11 +15583,18 @@ The TAB stage (Stage 3) SHALL produce an AST node of type `ForeignBlock` for eac
 ```
 ForeignBlock {
     level: number          // count of '=' characters in the level mark
-    lang: string           // resolved from closest ancestor <program lang=...>
-    raw: string            // verbatim content between opener and closer
+    lang: string           // resolved from closest ancestor <program lang=...> (§23.2.1; stamped by TS)
+    raw: string            // verbatim content between opener and closer (incl. any in:{} header)
     span: SourceSpan       // position of the opener in the source file
     programRef: ProgramId  // ID of the governing <program> node
+    // --- inline value-returning form (§23.2.4a, lang=ts/js) ---
+    body: string           // verbatim foreign code with the in:{} header stripped (what CG splices)
+    crossings: string[]    // the in:{} named values crossing IN (NO free lexical capture)
 }
+
+For the inline value-returning form the node is attached as `foreignNode` on the enclosing
+`const`/`let`-decl or `return-stmt` (mirroring the `sqlNode` attachment for `?{}`); the bare
+statement form is a standalone `ForeignBlock` (rejected by E-FOREIGN-004 per §23.2.4).
 ```
 
 All downstream pipeline stages (PA, RI, TS, DG) SHALL skip `ForeignBlock` nodes. CG SHALL
@@ -15604,20 +15611,101 @@ hand off the `raw` content and `lang` to the external toolchain invocation.
 | RI | Skips `ForeignBlock` nodes — foreign code does not affect route analysis |
 | TS | Skips `ForeignBlock` nodes — no type checking of foreign code |
 | DG | Skips `ForeignBlock` nodes |
-| CG | Extracts `raw` content, invokes declared external toolchain, emits toolchain output |
+| CG | Sidecar form: extracts `raw`, invokes the declared external toolchain. Inline value-returning ts/js form (§23.2.4a): splices the verbatim slice into an async IIFE with the `in:{}` names as params + a codegen-injected boundary `await` (§13180); server-only (E-SQL-004 color rule) |
 
 ### 23.2.4 Valid Contexts
 
-A `_{}` foreign code block is valid ONLY as a direct child of a `<program>` element. It is
-NOT valid inside:
-- Logic contexts (`${}`)
-- SQL contexts (`?{}`)
-- CSS contexts (`#{}`)
-- Meta contexts (`^{}`)
-- Markup element bodies (as a child of `<div>`, `<span>`, etc.)
+A `_{}` foreign code block is valid in EXACTLY TWO forms:
 
-A `_{}` block in any invalid context SHALL be a compile error (E-FOREIGN-004: foreign code
-block is not valid in this context; it must be a direct child of a `<program>` element).
+1. **Sidecar form** — as a direct child of a `<program>` element (the `<program lang=... build=...
+   port=...>` + `use foreign:` §23.4 out-of-process service). This is the original form.
+
+2. **Inline value-returning form** — `const x = _={ … }=` (or `let x = …` / `return _={ … }=`)
+   in a server `function` body, with `lang="ts"`/`"js"` only. Added 2026-06-23 (dpa-003, ratified
+   S216). This is the in-process value-flow form: the block's settled value flows back into the
+   scrml binding at the §13180 JS-host boundary. (See §23.2.4a.)
+
+A `_{}` block in any OTHER context — a `${}` logic context that is NOT the inline value-returning
+form (a bare, non-value-returning `_{}` statement), a `?{}` / `#{}` / `^{}` context, or a markup
+element body — SHALL be a compile error (E-FOREIGN-004: a bare non-value-returning `_={ … }=`
+block is not valid here; bind its value with `const x = _={ … }=` / `return _={ … }=` in a server
+`function` body, or use a `use foreign:` sidecar §23.4).
+
+**Reconciliation with §13180.** §13180 already names `_{}` as a value-flow boundary source (a JS
+Promise crossing into a scrml variable). Prior to this amendment §23.2.4 contradicted §13180 by
+forbidding ALL logic-context `_{}`. This amendment resolves the contradiction: the inline
+value-returning `_{}` in a server `function` body is the §13180 boundary made concrete. The same
+server-scope color rule that restricts `?{}` (E-SQL-004, §44) applies — an inline `_{}` escalates
+its enclosing function to the server boundary; the opaque slice is emitted server-side ONLY and
+never reaches client output. (dpa-004 C2: host-driving `_{}` is permitted ONLY in server `function`
+bodies — NOT `fn`/pure helpers, NOT `<cell>` initializers, NOT reactive bindings.)
+
+### 23.2.4a Inline Value-Returning Form (`lang="ts"`/`"js"`)
+
+**Added 2026-06-23 (dpa-003, ratified S216 — Approach B + the `<api>`-proven OUT-typing hybrid).**
+
+The inline form splices an opaque ts/js expression in-process and reads its settled value into a
+scrml local:
+
+```scrml
+<program lang="ts" db="./flogence.db">
+  function dispatchOne(prompt: string, path: string) {
+    const out = _={ in: { prompt, path }
+      await new Response(
+        Bun.spawn(["claude","-p",prompt,"--output-format","text"], { cwd: path }).stdout
+      ).text()
+    }=
+    return out
+  }
+</program>
+```
+
+**Crossing grammar (`in:{}` header).** The set of enclosing scrml locals that cross INTO the opaque
+slice is declared ONCE, at the top of the block, inside the braces, as `in: { name, name }`. The
+named values are the ONLY things that cross — there is NO free lexical capture (the slice sees only
+what `in:{}` names). The header is optional (`in: {}` or omitted = no crossings).
+
+**Codegen (the §13180 boundary).** The compiler lowers the inline form to an async IIFE: the
+`in:{}` names become the IIFE parameters, called with the same-named enclosing locals, and the
+`await` is INJECTED by codegen at the boundary (no source-level `await` is required on the scrml
+side — the slice itself, being verbatim ts/js, MAY use `await` internally):
+
+```js
+const out = await (async (prompt, path) => {
+  return (await new Response(Bun.spawn(["claude","-p",prompt,"--output-format","text"],{cwd:path}).stdout).text());
+})(prompt, path);
+```
+
+This mirrors the `?{}` `case "sql"` lowering — the await is the boundary, not source vocabulary.
+
+**Opacity (§23.2.3).** The slice interior is OPAQUE: the TS / RI / DG stages SKIP it (no type
+checking, no route analysis, no dependency tracking of foreign code). scrml's guarantees end at the
+brace (dpa-004 C3). Only the `in:{}` crossing names and the OUT value are visible to scrml analysis.
+
+**OUT-typing (the `<api>`-proven hybrid).** The block's OUT value is an UNOWNED foreign value. It is
+typed `asIs` (§14.7 — the named hatch §14.1.1 designates for "a foreign value") by DEFAULT — the
+compiler does NOT infer the OUT type from the opaque slice (that would reverse the §23.2.3 opacity
+contract; no FFI system infers an inline block's return from its body). A call-site annotation
+(`const out: SomeType = _={ … }=`) STATES the intended type and overrides the default; a
+`parseVariant` (§41.13) decode discharges the `asIs` resolution obligation (E-TYPE-030) for
+non-trivial shapes — exactly the annotate-AND-decode discipline §60.2/§60.5 ship for the `<api>`
+unowned boundary (owned boundaries → INFER; unowned boundaries → DECLARE-and-DECODE, never infer
+from the foreign side). A settled `null`/`undefined` OUT arrives as scrml `not` (§42.9), so an
+annotation must admit absence (`T?`) or the narrow must handle it.
+
+**Language scope (ts/js only).** The inline value-returning form is supported ONLY for
+`lang="ts"`/`"js"` (the value crosses NATIVELY — same Bun runtime, no marshaling). An inline
+value-returning `_{}` whose resolved `lang=` is NOT `ts`/`js` SHALL be a compile error (E-FOREIGN-005:
+arbitrary-language inline `_{}` value-flow is not yet supported — use a `use foreign:` sidecar §23.4
+for an out-of-process service). Inline value-flow for other languages is banked (dpa-009) — it has
+no defined runtime model in this section. An inline `_{}` with no resolved `lang=` on any ancestor
+`<program>` SHALL be E-FOREIGN-003 (as for the sidecar form).
+
+**Inline vs sidecar (coexistence by process lifetime).** The inline `_{}` and the §23 `use foreign:`
+sidecar COEXIST (they are not rivals). The discriminator is process LIFETIME, not language: if the
+foreign process must OUTLIVE the call (a long-lived out-of-process service — a standing Go/Python
+server, a warm model host), use the sidecar; if it runs to a value WITHIN the call (a one-shot
+spawn whose settled value flows to a local), use inline `_{}`. (dpa-003 (b), ratified S216.)
 
 ### 23.2.5 Worked Examples
 
@@ -15683,7 +15771,8 @@ ancestor `<program>`. Add `lang="go"` (or the appropriate language) to the enclo
 | E-FOREIGN-001 | Level mismatch between `_{}` opener and closer | Error |
 | E-FOREIGN-002 | `_{}` block reaches end-of-file without a matching closer | Error |
 | E-FOREIGN-003 | `_{}` block has no `lang=` declaration in any ancestor `<program>` | Error |
-| E-FOREIGN-004 | `_{}` block appears in an invalid context (not a direct child of `<program>`) | Error |
+| E-FOREIGN-004 | `_{}` block in an invalid context: a bare non-value-returning `_{}`, or a `?{}`/`#{}`/`^{}`/markup-body context (the admitted forms are the §23.4 sidecar and the §23.2.4a inline value-returning `const x = _={ … }=` in a server `function` body) | Error |
+| E-FOREIGN-005 | inline value-returning `_{}` whose resolved `lang=` is not `ts`/`js` (arbitrary-language inline value-flow not yet supported — use a `use foreign:` sidecar §23.4) | Error |
 | W-FOREIGN-001 | Level-0 `_{` used; `_={}=` recommended | Warning |
 
 ### 23.3 Call-Char Sigils for WASM
@@ -16889,7 +16978,8 @@ Rationale: the unified purity contract preserves the `<machine>` subsystem's rep
 | E-FOREIGN-001 | §23.2 | Level mismatch between `_{}` opener and closer | Error |
 | E-FOREIGN-002 | §23.2 | `_{}` block reaches end-of-file without a matching closer | Error |
 | E-FOREIGN-003 | §23.2 | `_{}` block has no `lang=` declaration in any ancestor `<program>` | Error |
-| E-FOREIGN-004 | §23.2 | `_{}` block appears in an invalid context (not a direct child of `<program>`) | Error |
+| E-FOREIGN-004 | §23.2.4 | `_{}` in an invalid context: a bare non-value-returning `_{}`, or a `?{}`/`#{}`/`^{}`/markup-body context (admitted: §23.4 sidecar + §23.2.4a inline value-returning `const x = _={ … }=` in a server `function` body) | Error |
+| E-FOREIGN-005 | §23.2.4a | inline value-returning `_{}` whose resolved `lang=` is not `ts`/`js` (use a `use foreign:` sidecar §23.4 for an out-of-process service) | Error |
 | E-PROGRAM-001 | §4.12 | Circular `<program>` nesting detected | Error |
 | W-PROGRAM-TITLE-NESTED | §40.7 | A documentary attribute (`title=`, `description=`, `version=`, `author=`, `license=`) appears on a nested `<program>`. Documentary attributes are meaningful only at the top level (HTML `<head>` semantics); workers have no DOM `<head>`. Move the attribute to the top-level `<program>` or remove it. (Phase A1a) | Warning |
 | E-STORY-UNKNOWN | §58.9 | A `story="<name>"` attribute on a nested `<program>` references a `<name>` with no corresponding `[story.<name>]` entry in the project manifest (`scrml.toml`). Declare the build story in the manifest's `[story]` table, or correct the name. (S118 — Build Story, §58) | Error |

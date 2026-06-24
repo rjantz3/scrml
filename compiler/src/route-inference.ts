@@ -983,6 +983,19 @@ export function walkBodyForTriggers(
       return;
     }
 
+    // dpa-003 (S216) Trigger 1: an inline `_={ … }=` foreign-code block drives
+    // the host (process spawn / file IO) and is server-only — same color rule
+    // as `?{}` (dpa-004 C2, mirrors E-SQL-004). Escalate the enclosing fn so
+    // the opaque slice is emitted server-side and never reaches client output.
+    if (node.kind === "foreign") {
+      triggers.push({
+        kind: "server-only-resource",
+        resourceType: "foreign-inline",
+        span: node.span,
+      });
+      return;
+    }
+
     if (node.kind === "bare-expr") {
       // Phase 4d Step 8: ExprNode-first; runtime-only string fallback (bare-expr.expr TS field deleted)
       const expr = (node as any).exprNode ? emitStringFromTree((node as any).exprNode) : ((node as any).expr ?? "");
@@ -1087,6 +1100,17 @@ export function walkBodyForTriggers(
         triggers.push({
           kind: "server-only-resource",
           resourceType: "sql-query",
+          span: node.span,
+        });
+      }
+
+      // dpa-003 (S216): a `const/let x = _={ … }=` foreign-init escalates the
+      // enclosing fn to server (the attached `foreignNode` is invisible to the
+      // string-scanning detectServerOnlyResource — mirror the sqlNode trigger).
+      if ((node as any).foreignNode && (node as any).foreignNode.kind === "foreign") {
+        triggers.push({
+          kind: "server-only-resource",
+          resourceType: "foreign-inline",
           span: node.span,
         });
       }
@@ -1201,6 +1225,14 @@ export function walkBodyForTriggers(
         triggers.push({
           kind: "server-only-resource",
           resourceType: "sql-query",
+          span: node.span,
+        });
+      }
+      // dpa-003 (S216): `return _={ … }=` foreign-init escalates to server.
+      if ((node as any).foreignNode && (node as any).foreignNode.kind === "foreign") {
+        triggers.push({
+          kind: "server-only-resource",
+          resourceType: "foreign-inline",
           span: node.span,
         });
       }
@@ -1974,6 +2006,14 @@ function controlFlowContainsServerTrigger(
   // structured `sqlNode` while the string surface is the placeholder sentinel).
   if ((node as any).sqlNode && (node as any).sqlNode.kind === "sql") return true;
 
+  // dpa-003 (S216) — an inline `_={ … }=` foreign-code block is server-only
+  // (it drives the host: spawns processes, reads files). Same color rule that
+  // restricts `?{}` (dpa-004 C2, mirrors E-SQL-004). A foreign node anywhere in
+  // the nested body — or attached via `foreignNode` on a decl/return — escalates
+  // the enclosing fn to server so the opaque slice never reaches client output.
+  if (kind === "foreign") return true;
+  if ((node as any).foreignNode && (node as any).foreignNode.kind === "foreign") return true;
+
   if (kind === "bare-expr") {
     // Use the RAW `.expr` string — for a match-arm bare-expr the structured
     // `exprNode` is only the arm pattern literal (e.g. `"add"`); the inline
@@ -2071,6 +2111,10 @@ function isServerTriggerStatement(
 
   // SQL blocks are always server-side
   if (node.kind === "sql") return true;
+
+  // dpa-003 (S216) — inline foreign-code `_={ … }=` is always server-side.
+  if (node.kind === "foreign") return true;
+  if ((node as any).foreignNode && (node as any).foreignNode.kind === "foreign") return true;
 
   if (node.kind === "bare-expr") {
     // Phase 4d Step 8: ExprNode-first; runtime-only string fallback (bare-expr.expr TS field deleted)

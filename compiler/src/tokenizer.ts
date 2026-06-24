@@ -1163,7 +1163,7 @@ export function tokenizeLogic(content: string, baseOffset: number, baseLine: num
 
   // Only brace-delimited block types should be skipped and replaced with BLOCK_REF.
   // Text and comment blocks are already represented as raw characters in `content`.
-  const BLOCKREF_TYPES = new Set(["logic", "sql", "css", "error-effect", "meta"]);
+  const BLOCKREF_TYPES = new Set(["logic", "sql", "css", "error-effect", "meta", "foreign"]);  // dpa-003 (S216) — `_={ … }=` inline foreign-code block emits a BLOCK_REF in logic.
 
   const childByStart = new Map<number, Block>();
   for (const child of children) {
