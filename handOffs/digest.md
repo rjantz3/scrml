@@ -1,9 +1,9 @@
-<!-- @digest head=c75964b2 delta-seq=63 -->
+<!-- @digest head=8a78442b delta-seq=64 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `c75964b2`** + delta-log **[63]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `c75964b2`
+> **HEAD `8a78442b`** + delta-log **[64]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `8a78442b`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,27 +13,27 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `c75964b2`
-- **HIGH 0** · MED 13 · LOW 13 · Nominal 8
+## Board — from `@gap` tokens @ `8a78442b`
+- **HIGH 0** · MED 15 · LOW 15 · Nominal 8
 - Named open HIGHs: _none_
 
 ## Recent rulings — last 0 `rule` (delta-log S218 — 2026-06-24)
 - _(none in the latest session)_
 
 ## Recent activity — last 6 `disp`/`land`/`find`/`state`
-- `[60]` state · **(dpa: complete → dpa-011)** PA-test-rig DD DRAINED (ADVISORY, NOT ratified). Verdict: **GO Phase-1 (premise test, runnable now via spawn-as-pa-base-proxy); NO… → flogence/docs/deep-dives/pa-test-rig-design-2026-06-24.md
 - `[59]` state · **`~/.claude/CLAUDE.md` TRIMMED 86→16 lines + PA methodology relocated → `~/.claude/pa-global.md` (user "pa-global.md" — option A).** That file auto-loads into… → ~/.claude/{CLAUDE.md,pa-global.md} + pa-scrml.md
 - `[60]` disp · **6nz Bug AI (MED) DISPATCHED — `<each>`/`<empty>` fallback not torn down on empty→non-empty.** PA R26-reverse CONFIRMED structurally @HEAD 82f76085 (6nz hypoth… → BRIEF.md + agent aeff05bd
 - `[61]` disp · **`_{}` INLINE-CODEGEN BUILD DISPATCHED (dpa-003, ratified S215 Approach B + S216 OUT-typing hybrid).** User decisions FINAL (AskUserQuestion): **`in:{}` header… → BRIEF.md + agent ad25a4d3
 - `[62]` land · **6nz Bug AI FIXED + LANDED (PA file-delta, agent aeff05bd @696b16c4 → PA commit next).** Root = PA direction exactly: `_scrml_reconcile_list` (runtime-template… → PA commit + known-gaps@wrap
 - `[63]` land · **`_{}` INLINE-CODEGEN BUILT + LANDED (dpa-003; PA file-delta, agent ad25a4d3 @c816c0c7 → PA commit next).** The inline value-returning `const x = _={ in:{…} …… → PA commit + known-gaps@wrap
+- `[64]` state · **S218 WRAP.** Full suite **25050/0/213**. **6 commits this session** (d34e473a boot-gate+bookkeeping · e493bace GITI-032 · e64c4095 6nz · 85e0d687 `_{}` · 82f7… → S218 close
 
 ## State
-- Version: 0.7.0 · maps: 13 commits behind HEAD (watermark 489951aa, HEAD c75964b2)
+- Version: 0.7.0 · maps: 16 commits behind HEAD (watermark 489951aa, HEAD 8a78442b)
 - Recent wraps:
+  - 7adae6fb chore(s218): wrap — close + bookkeeping
   - 489951aa chore(s217): wrap-finalize — digest regen at settled HEAD + 3 intakes carried
   - 6c5c0d58 chore(s216): wrap — close + bookkeeping (hand-off close, changelog S216, master-list §0 [HIGH 1->0], known-gaps HIGH-flip + §0 regen, delta-log [39-40], dpa-queue+artifact ratification flips, 3 inbox->read)
-  - a2137214 chore(s215): wrap-finalize — recent-sessions + digest regen at settled HEAD 27900a6c
 
 ## NOT in the digest (read source for these)
 - Open questions awaiting you → `hand-off.md` §"OPEN THREADS / Open questions"
