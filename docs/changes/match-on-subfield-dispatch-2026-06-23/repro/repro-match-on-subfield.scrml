@@ -1,0 +1,5 @@
+<program>
+type P:enum = { Idle, Ok }
+<cell> = { state: P.Idle, n: 0 }
+<match for=P on=@cell.state><Idle><p>IDLE</p></Idle><Ok><p>OK</p></Ok></match>
+</program>

@@ -1,0 +1,5 @@
+<program>
+type P:enum = { Idle, Ok }
+<cell> = { inner: { phase: P.Idle } }
+<match for=P on=@cell.inner.phase><Idle><p>IDLE</p></Idle><Ok><p>OK</p></Ok></match>
+</program>

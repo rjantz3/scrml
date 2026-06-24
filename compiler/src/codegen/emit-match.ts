@@ -221,6 +221,12 @@ interface OnExprResolution {
    *  when on= is auto-implied to an engine variable (Shape A). Null when
    *  on= is a non-cell expression (Shape B effect mode). */
   variantSubscribeName: string | null;
+  /** Member-access sub-path suffix applied to the subscribed cell, e.g.
+   *  ".state" for `on=@cell.state`. Empty string for a bare `@cell` ref or
+   *  an auto-implied engine var. GITI-031 (2026-06-23) — Shape A subscribe
+   *  fires the callback with the WHOLE cell value, so the dispatch must
+   *  apply this sub-path to reach the enum-variant discriminant. */
+  subscribeSubPath: string;
 }
 
 /**
@@ -293,6 +299,7 @@ function resolveOnExpr(
       return {
         variantExprAccessor: `_scrml_reactive_get(${JSON.stringify(cellName)})`,
         variantSubscribeName: cellName,
+        subscribeSubPath: "",
       };
     }
     // `${expr}` interpolation form — strip wrapping + use inner as JS expr.
@@ -320,6 +327,7 @@ function resolveOnExpr(
       return {
         variantExprAccessor: `(_scrml_reactive_get(${JSON.stringify(rootCell)}))${path}`,
         variantSubscribeName: rootCell,
+        subscribeSubPath: path,
       };
     }
     // S138 Bug 52 — bare-variant `.Variant` form (§14.10 / §18.0.3 lowering).
@@ -338,6 +346,7 @@ function resolveOnExpr(
       return {
         variantExprAccessor: JSON.stringify(bareVariantMatch[1]),
         variantSubscribeName: null,
+        subscribeSubPath: "",
       };
     }
     // Fall-through: complex expression (calls, arrows, operators — e.g.
@@ -378,6 +387,7 @@ function resolveOnExpr(
     return {
       variantExprAccessor: loweredAccessor,
       variantSubscribeName: null,
+      subscribeSubPath: "",
     };
   }
   // Auto-implied — find engine in scope.
@@ -386,6 +396,7 @@ function resolveOnExpr(
     return {
       variantExprAccessor: `_scrml_reactive_get(${JSON.stringify(engineVar)})`,
       variantSubscribeName: engineVar,
+      subscribeSubPath: "",
     };
   }
   // No on=, no engine — E-MATCH-ON-REQUIRED fires upstream; codegen skips.
@@ -1134,6 +1145,11 @@ export function emitMatchBodyRenderForFile(
         // The helper's DOMContentLoaded initial-fire bridges Shape A's
         // "subscribe doesn't fire at init" gap.
         variantSubscribeName: onResolved.variantSubscribeName,
+        // GITI-031 (2026-06-23) -- when on= is a member-access (`@cell.state`)
+        // the subscribe path fires the callback with the WHOLE cell value, so
+        // the dispatch + DOMContentLoaded-init paths apply this sub-path to
+        // reach the enum-variant discriminant. Empty for a bare `@cell` ref.
+        ...(onResolved.subscribeSubPath ? { subscribeSubPath: onResolved.subscribeSubPath } : {}),
         ...(hasWildcard ? { defaultArmTag: "_" } : {}),
         ...(isInEach ? { itemScopedDispatch: true } : {}),
       },

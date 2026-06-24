@@ -220,6 +220,16 @@ export interface VariantGuardOptions {
   mountAttr?: string;
   renderFnPrefix?: string;
   variantSubscribeName?: string | null;
+  /**
+   * GITI-031 (2026-06-23) -- member-access sub-path suffix applied to the
+   * subscribed cell, e.g. ".state" for `on=@cell.state`. When set (Shape A
+   * with a dotted on=), the subscribe callback receives the WHOLE cell value
+   * and the DOMContentLoaded init-fire reads the whole cell, so both must
+   * apply this suffix to reach the enum-variant discriminant. Undefined /
+   * empty for a bare `@cell` ref or an auto-implied engine var (the cell
+   * value IS the variant, no sub-path needed).
+   */
+  subscribeSubPath?: string;
   defaultArmTag?: string;
   /**
    * R28-1b (S143) — item-scoped dispatch mode for a block-form `<match>`
@@ -970,6 +980,11 @@ export function emitVariantGuardedRender(
   //     reactive bindings. Reserved for future match-block-form consumer
   //     when `on=` is a non-cell expression.
   const subscribeName = opts.variantSubscribeName ?? null;
+  // GITI-031 (2026-06-23) -- Shape-A member-access sub-path suffix (e.g.
+  // ".state"). When non-empty, the subscribe callback receives the WHOLE
+  // subscribed-cell value and the DOMContentLoaded init-fire reads the whole
+  // cell, so both apply this suffix to reach the enum-variant discriminant.
+  const subPath = opts.subscribeSubPath ?? "";
   // R28-1b (S143) — item-scoped dispatch (block-form match inside <each>).
   // In this mode the dispatcher takes the mount element as a parameter (one
   // mount per item, created by the each factory) and isolates dispose state
@@ -1142,7 +1157,15 @@ export function emitVariantGuardedRender(
     // Subscribe to variant changes — fires on set, not at init.
     if (subscribeName !== null) {
       // Shape A — subscribe-only, fires on set, not at init.
-      dispatcherLines.push(`_scrml_reactive_subscribe(${JSON.stringify(subscribeName)}, ${dispatchFnName});`);
+      // GITI-031 — when on= is a member-access (`@cell.state`), the subscribe
+      // callback fires with the WHOLE cell value, so wrap the dispatch to apply
+      // the sub-path. A bare `@cell` ref (subPath === "") passes the dispatch
+      // fn directly — the cell value IS the variant.
+      if (subPath) {
+        dispatcherLines.push(`_scrml_reactive_subscribe(${JSON.stringify(subscribeName)}, function(_cv) { ${dispatchFnName}((_cv)${subPath}); });`);
+      } else {
+        dispatcherLines.push(`_scrml_reactive_subscribe(${JSON.stringify(subscribeName)}, ${dispatchFnName});`);
+      }
     } else {
       // Shape B — effect, fires at init too. Tracks deps via runtime
       // _scrml_effect_stack on the variantExprAccessor() read.
@@ -1164,7 +1187,10 @@ export function emitVariantGuardedRender(
   // each factory dispatches every item explicitly at create/reconcile time.
   if (!itemScoped && subscribeName !== null) {
     dispatcherLines.push(`document.addEventListener('DOMContentLoaded', function() {`);
-    dispatcherLines.push(`  ${dispatchFnName}(_scrml_reactive_get(${JSON.stringify(subscribeName)}));`);
+    // GITI-031 — apply the Shape-A member-access sub-path to the initial
+    // cell read so the init-fire dispatches on the enum-variant discriminant,
+    // not the parent struct. `subPath` is "" for a bare `@cell` ref.
+    dispatcherLines.push(`  ${dispatchFnName}(_scrml_reactive_get(${JSON.stringify(subscribeName)})${subPath});`);
     dispatcherLines.push(`});`);
   }
 
