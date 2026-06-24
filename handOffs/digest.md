@@ -1,9 +1,9 @@
-<!-- @digest head=3f8cf3be delta-seq=40 -->
+<!-- @digest head=ea41edc1 delta-seq=53 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `3f8cf3be`** + delta-log **[40]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `3f8cf3be`
+> **HEAD `ea41edc1`** + delta-log **[53]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `ea41edc1`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,31 +13,31 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `3f8cf3be`
+## Board — from `@gap` tokens @ `ea41edc1`
 - **HIGH 0** · MED 13 · LOW 13 · Nominal 8
 - Named open HIGHs: _none_
 
 ## Recent rulings — last 5 `rule` (delta-log S215 — 2026-06-23)
-- `[25]` rule/state · **`_{}` design-conv (user) — "Inline all the way" RULED + dpa-009 banked.** dpa-003 narrowed to the INLINE value-returning form (`const out = _={…}=`) NOT the §… → dpa-queue.md
 - `[31]` find/rule · **Bug-51 fix S215-ADVERSARIAL-GATE run by PA-as-lander (`/code-review` 3-angle finder fan-out) — caught real adjacents; scary headline EMPIRICALLY REFUTED.** Fi… → known-gaps §S216 + /tmp/bug51-toenum
 - `[35]` rule · **§52 server-cell decl-RHS `?{}` = LOAD (Pattern C) RATIFIED (user "rule LOAD, ship param-free first").** Disposition A from the §52 DD. The "conflict" was narr… → design-insights + DD doc
 - `[39]` rule · **Escalation-#2 RATIFIED (user "ratify both") — author `route=` on `server function*` allowed in APP mode (narrow BYOB serve-side carve-out).** scrml honors an… → design-insights
 - `[40]` rule · **dpa-003 RATIFIED (user "ratify both") — foreign-code `_{}` OUT-typing = `<api>`-proven hybrid; inline+sidecar COEXIST by process-lifetime.** (a) eliminate inf… → design-insights + dpa-queue
+- `[48]` disp/rule · **giti EACH + MATCH clusters DISPATCHED (user greenlight "each/match, parallel") + IP=private voice-fork SETTLED.** (1) EACH-cluster agent **a296c101** (change-… → agents a296c101+a9cdf450 + DD doc
 
 ## Recent activity — last 6 `disp`/`land`/`find`/`state`
-- `[32]` disp · **Bug-51 follow-up DISPATCHED (collision guard + import-prune ordering + collision test).** scrml-js-codegen-engineer · isolation:worktree · opus · bg. FF-merge… → giti-bug51 change-id
-- `[33]` disp · **Half-1 convergence DISPATCHED (user "3 parallel go") — the g-bindvalue-wiring-dropped-in-match-arm HIGH, fix-once-covers-TWO (match arms + engine state-child… → change-id family-a-converge-half1-2026-06-23
-- `[34]` disp · **§52 server-cell-load-RHS SPEC-conflict DD DISPATCHED (escalation #1, user "3 parallel go").** scrml-deep-dive · bg → `scrml-support/docs/deep-dives/section52-… → §52 DD doc
-- `[36]` land · **ss1 RE-INTEGRATED to main (user "integrate ss1") — 4 items cherry-picked + combined-state re-baseline.** spa/ss1 (base 0d4ba428) cherry-picked onto main (Bug-… → main 96745d34
-- `[37]` land · **Family-A convergence HALF-1 DONE (e8de5d5e) — the g-bindvalue-wiring-dropped-in-match-arm HIGH, fix-once-covers-TWO.** Extracted root-agnostic `emitBindDirect… → branch e8de5d5e
-- `[38]` state · **3 intakes + a dPA verdict + §52-fix dispatch.** (1) giti REPLIED — **Bug-51 VERIFIED fixed** (7 pages compile, server bundles carry enum defs, SSE 3 frames, l… → known-gaps + dpa-queue + §52 change-id
+- `[48]` disp/rule · **giti EACH + MATCH clusters DISPATCHED (user greenlight "each/match, parallel") + IP=private voice-fork SETTLED.** (1) EACH-cluster agent **a296c101** (change-… → agents a296c101+a9cdf450 + DD doc
+- `[49]` state · **IP MVP increment-1 DONE (per-user split + identity wired), parallel to the 3 codegen agents.** Created `scrml-support/pa-profile-bryan.md` (extracts bryan's p… → scrml-support/pa-profile-*.md + pa-scrml.md
+- `[50]` state · **IP MVP increment-2 DONE — agents-distribution (the HARD gap) CLOSED.** Staged 18 scrml-relevant PA agents (all of `~/.claude/agents/` EXCEPT cementer-go-engin… → scrml-support/agents/ + README
+- `[51]` land · **GITI-031 match-on-subfield FIXED + LANDED (PA-commit, agent a9cdf450 @7f4670a3).** `<match on=@cell.state>` was emitting `_dispatch(_scrml_reactive_get("cell"… → match commit
+- `[52]` land · **giti render cluster COMPLETE — each (GITI-030) + on-mount (GITI-029 + g-onmount) LANDED** (match GITI-031 was [51]). **GITI-030** (each agent a296c101 @191f21… → commits 7bf92bf1 + on-mount
+- `[53]` state · **S217 WRAP.** Combined full-suite GREEN 25007/0 (1063 files) — within-node re-baseline + all 4 codegen landings hold. **5 commits this session** (escalation-2… → S217 close
 
 ## State
-- Version: 0.7.0 · maps: 1 commits behind HEAD (watermark 7c01b22a, HEAD 3f8cf3be)
+- Version: 0.7.0 · maps: 8 commits behind HEAD (watermark 7c01b22a, HEAD ea41edc1)
 - Recent wraps:
+  - c7247965 chore(s217): wrap — close + bookkeeping
   - 6c5c0d58 chore(s216): wrap — close + bookkeeping (hand-off close, changelog S216, master-list §0 [HIGH 1->0], known-gaps HIGH-flip + §0 regen, delta-log [39-40], dpa-queue+artifact ratification flips, 3 inbox->read)
   - a2137214 chore(s215): wrap-finalize — recent-sessions + digest regen at settled HEAD 27900a6c
-  - cab2cca0 wrap(s214): integrate sPA ss15 + close — render-collection cluster + reconciliation
 
 ## NOT in the digest (read source for these)
 - Open questions awaiting you → `hand-off.md` §"OPEN THREADS / Open questions"
