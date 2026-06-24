@@ -1610,6 +1610,15 @@ function _scrml_reconcile_list(container, newItems, keyFn, createFn) {
 
   // Fast path: bulk create from empty — skip diffing, append directly
   if (oldNodes.size === 0) {
+    // 6nz Bug AI — clear any stray NON-keyed content before bulk-appending.
+    // oldNodes.size === 0 means this container holds ZERO keyed reconcile
+    // children, so anything currently in it is stray: the <empty> fallback left
+    // by the each render fn's empty branch (replaceChildren + append fallback +
+    // return) on the empty -> non-empty edge, or nothing at all on first render.
+    // Without this, the fallback survives beside the first real items. The keyed
+    // reconcile path below (oldNodes.size > 0) is NOT affected — it owns its
+    // keyed nodes and is reached only when keyed children already exist.
+    container.replaceChildren();
     if (__SCRML_PERF) {
       for (let i = 0; i < newItems.length; i++) {
         const node = createFn(newItems[i], i);
