@@ -1,9 +1,9 @@
-<!-- @digest head=2e07db4d delta-seq=54 -->
+<!-- @digest head=90d4c23b delta-seq=54 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `2e07db4d`** + delta-log **[54]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `2e07db4d`
+> **HEAD `90d4c23b`** + delta-log **[54]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `90d4c23b`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,7 +13,7 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `2e07db4d`
+## Board — from `@gap` tokens @ `90d4c23b`
 - **HIGH 0** · MED 13 · LOW 13 · Nominal 8
 - Named open HIGHs: _none_
 
@@ -33,7 +33,7 @@
 - `[54]` land · **Ryan PR#1 round-2 + #2 CSRF ADOPTED + LANDED (user "land and push Ryan's work").** First external-contributor landing. **#1** (`--no-ff merge` ryan/claude/fix… → b2bf9959 + d706f111
 
 ## State
-- Version: 0.7.0 · maps: 11 commits behind HEAD (watermark 062165a5, HEAD 2e07db4d)
+- Version: 0.7.0 · maps: 12 commits behind HEAD (watermark 062165a5, HEAD 90d4c23b)
 - Recent wraps:
   - c7247965 chore(s217): wrap — close + bookkeeping
   - 6c5c0d58 chore(s216): wrap — close + bookkeeping (hand-off close, changelog S216, master-list §0 [HIGH 1->0], known-gaps HIGH-flip + §0 regen, delta-log [39-40], dpa-queue+artifact ratification flips, 3 inbox->read)
