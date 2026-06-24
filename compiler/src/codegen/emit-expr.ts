@@ -1915,35 +1915,42 @@ export function arrowBodyStringNeedsParens(body: string): boolean {
 }
 
 function emitLambda(node: LambdaExpr, ctx: EmitExprContext): string {
-  const params = node.params.map(p => emitLambdaParam(p, ctx)).join(", ");
   const asyncPrefix = node.isAsync ? "async " : "";
 
   // Issue #1 (parent scrmlTS) — a sibling server-fn call inside a SYNCHRONOUS
-  // callback (`xs.map(x => peer(x))`, `.filter`, `.forEach`, a sort comparator)
-  // cannot be lowered: `await` is illegal in a non-async lambda, and silently
-  // making the lambda `async` would hand `.map`/`.forEach` an array of Promises
-  // instead of values. So we DON'T lower the call here — clearing `serverFnNames`
-  // for the body emits a bare `peer(...)` (parseable JS) instead of an `await`
-  // the compiler's own validator would reject. emit-server.ts detects this same
-  // shape against the AST and raises the actionable `E-SERVER-FN-IN-SYNC-CALLBACK`
-  // diagnostic there (it owns the clean diagnostics accumulator; wiring one
-  // through expression emission would surface unrelated previously-swallowed
-  // errors — e.g. latent `E-CG-003` in shim `match` arms).
+  // callback (`xs.map(x => peer(x))`, `.filter`, `.forEach`, a sort comparator,
+  // OR a parameter DEFAULT like `(x, y = peer()) => …`) cannot be lowered:
+  // `await` is illegal in a non-async lambda, and silently making the lambda
+  // `async` would hand `.map`/`.forEach` an array of Promises instead of values.
+  // So we DON'T lower the call here — clearing `serverFnNames` for BOTH the
+  // param defaults and the body emits a bare `peer(...)` (parseable JS) instead
+  // of an `await` the compiler's own validator would reject. emit-server.ts
+  // detects the same shape (body + param defaults) against the AST and raises the
+  // actionable `E-SERVER-FN-IN-SYNC-CALLBACK` there (it owns the clean
+  // diagnostics accumulator; wiring one through expression emission would
+  // surface unrelated previously-swallowed errors — e.g. latent `E-CG-003`).
   let bodyCtx = ctx;
-  if (
-    !node.isAsync &&
-    ctx.mode === "server" &&
-    ctx.serverFnNames != null &&
-    node.body.kind === "expr"
-  ) {
-    const callees = exprNodeCollectCallees(node.body.value as unknown as Parameters<typeof exprNodeCollectCallees>[0]);
-    const hit = callees.find(
-      (c) => ctx.serverFnNames!.has(c) && !(ctx.declaredNames != null && ctx.declaredNames.has(c)),
+  if (!node.isAsync && ctx.mode === "server" && ctx.serverFnNames != null) {
+    const _collect = exprNodeCollectCallees as (n: unknown) => string[];
+    const _shadow = new Set<string>(
+      node.params.map((p) => (p as { name?: string }).name).filter(Boolean) as string[],
     );
-    if (hit) {
-      bodyCtx = { ...ctx, serverFnNames: null };
+    const _hits: string[] = [];
+    if (node.body.kind === "expr") _hits.push(..._collect(node.body.value));
+    for (const p of node.params) {
+      const _dv = (p as { defaultValue?: unknown }).defaultValue;
+      if (_dv) _hits.push(..._collect(_dv));
     }
+    const hit = _hits.find(
+      (c) => ctx.serverFnNames!.has(c) && !_shadow.has(c)
+        && !(ctx.declaredNames != null && ctx.declaredNames.has(c)),
+    );
+    if (hit) bodyCtx = { ...ctx, serverFnNames: null };
   }
+
+  // Param defaults are emitted with `bodyCtx` too, so a peer call in a default
+  // of a sync lambda lowers to a bare call rather than an illegal `await`.
+  const params = node.params.map(p => emitLambdaParam(p, bodyCtx)).join(", ");
 
   if (node.fnStyle === "function") {
     // function(x) { ... }

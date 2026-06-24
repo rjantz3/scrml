@@ -280,3 +280,84 @@ describe("Issue #1 — review hardening", () => {
     expect(js).toMatch(/async function navigate\(to\) \{/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Round-2 upstream adversarial review — three confirmed defects.
+//   A: peer name collides with a synthesized binding (`routes`/`fetch`/enum).
+//   B: peer call in a sync-callback PARAMETER DEFAULT → invalid `await`.
+//   C: peer reached only through a lambda body (block-body sync, or async) was
+//      invisible to peer-emission → `await`/bare call to a missing peer (silent
+//      ReferenceError). The peer-emission scan must descend into lambdas; the
+//      sync-callback diagnostic must cover block bodies + param defaults.
+// ---------------------------------------------------------------------------
+
+describe("Issue #1 — round-2 hardening", () => {
+  const ITEMS = { "items.db": ["CREATE TABLE items (id INTEGER PRIMARY KEY, ord INTEGER, name TEXT)"] };
+  const wrap = (body) => `
+<program>
+<db src="./items.db" tables="items">
+  \${
+${body}
+  }
+  <button onclick=caller([1])>Go</button>
+</>
+</program>`;
+
+  // Defect A — a server fn named like a compiler-synthesized binding.
+  test("A: peer named `routes` yields E-CG-016, not a malformed-output defect", () => {
+    const { errors } = compileToFiles(wrap(
+`    server function routes(id) { const r = ?{\`SELECT name FROM items WHERE id = \${id}\`}.get(); return r.name }
+    server function caller(ids) { ?{\`INSERT INTO items (ord, name) VALUES (0, 'x')\`}.run(); return routes(ids[0]) }`),
+      "collide-routes", ITEMS);
+    const codes = errors.map((e) => e.code);
+    expect(codes).toContain("E-CG-016");
+    expect(codes).not.toContain("E-CODEGEN-INVALID-JS");
+  });
+
+  // Defect B — peer call in a synchronous-callback parameter default.
+  test("B: peer call in a sync-lambda param default → E-SERVER-FN-IN-SYNC-CALLBACK, not invalid JS", () => {
+    const { errors } = compileToFiles(wrap(
+`    server function lookup(x) { const r = ?{\`SELECT name FROM items WHERE id = \${x}\`}.get(); return r.name }
+    server function caller(ids) { ?{\`INSERT INTO items (ord, name) VALUES (0, 'x')\`}.run(); return ids.map((x, y = lookup(0)) => x) }`),
+      "param-default", ITEMS);
+    const codes = errors.map((e) => e.code);
+    expect(codes).toContain("E-SERVER-FN-IN-SYNC-CALLBACK");
+    expect(codes).not.toContain("E-CODEGEN-INVALID-JS");
+  });
+
+  // Defect C1 — sync BLOCK-body callback (the original "peer not defined" shape).
+  test("C1: peer in a sync block-body callback → E-SERVER-FN-IN-SYNC-CALLBACK (no silent bare call)", () => {
+    const { errors } = compileToFiles(wrap(
+`    server function lookup(x) { const r = ?{\`SELECT name FROM items WHERE id = \${x}\`}.get(); return r.name }
+    server function caller(ids) { ?{\`INSERT INTO items (ord, name) VALUES (0, 'x')\`}.run(); return ids.map(x => { return lookup(x) }) }`),
+      "sync-block", ITEMS);
+    const codes = errors.map((e) => e.code);
+    expect(codes).toContain("E-SERVER-FN-IN-SYNC-CALLBACK");
+    expect(codes).not.toContain("E-CODEGEN-INVALID-JS");
+  });
+
+  // Defect C2 — async expr-body lambda: LEGITIMATE composition. The peer MUST be
+  // emitted (previously `await helper(...)` referenced a missing fn → crash).
+  test("C2: peer reached through an async lambda compiles and the peer is emitted", () => {
+    const { errors, serverJsPath } = compileToFiles(wrap(
+`    server function helper(x) { const r = ?{\`SELECT name FROM items WHERE id = \${x}\`}.get(); return r.name }
+    server function caller(ids) { ?{\`INSERT INTO items (ord, name) VALUES (0, 'x')\`}.run(); const run = async () => helper(ids[0]); return run() }`),
+      "async-lambda", ITEMS);
+    expect(errors.filter((e) => !e.code?.startsWith("W-"))).toEqual([]);
+    const js = readFileSync(serverJsPath, "utf-8");
+    // Invariant: the awaited peer has a corresponding emitted callable.
+    expect(js).toMatch(/async function helper\(/);
+    expect(js).toContain("await helper(");
+  });
+
+  // Defect C3 — async BLOCK-body lambda: also legitimate; peer must be emitted.
+  test("C3: peer reached through an async block-body lambda compiles with the peer emitted", () => {
+    const { errors, serverJsPath } = compileToFiles(wrap(
+`    server function helper(x) { const r = ?{\`SELECT name FROM items WHERE id = \${x}\`}.get(); return r.name }
+    server function caller(ids) { ?{\`INSERT INTO items (ord, name) VALUES (0, 'x')\`}.run(); const run = async () => { return helper(ids[0]) }; return run() }`),
+      "async-block", ITEMS);
+    expect(errors.filter((e) => !e.code?.startsWith("W-"))).toEqual([]);
+    const js = readFileSync(serverJsPath, "utf-8");
+    expect(js).toMatch(/async function helper\(/);
+  });
+});
