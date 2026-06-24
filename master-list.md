@@ -87,7 +87,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
-- `c7247965` — chore(s217): wrap — close + bookkeeping — **pushed**
+- `489951aa` — chore(s217): wrap-finalize — digest regen at settled HEAD + 3 intakes carried — **pushed**
 - `6c5c0d58` — chore(s216): wrap — close + bookkeeping (hand-off close, changelog S216, master-list §0 [HIGH 1->0], known-gaps HIGH-flip + §0 regen, delta-log [39-40], dpa-queue+artifact ratification flips, 3 inbox->read) — **pushed**
 - `a2137214` — chore(s215): wrap-finalize — recent-sessions + digest regen at settled HEAD 27900a6c — **pushed**
 - `cab2cca0` — wrap(s214): integrate sPA ss15 + close — render-collection cluster + reconciliation — **pushed**
