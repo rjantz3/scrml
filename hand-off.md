@@ -19,7 +19,7 @@
 2. **escalation-2 typer-scope follow-on** — `g-sse-route-object-typer-scope` (route.lastEventId/route.query in SSE body → E-SCOPE-001; blocks the resumable-SSE FSP cursor). MED, dispatchable.
 3. **dpa-003 `_{}` inline-codegen BUILD** + §23.2.4 amendment (downstream of dpa-004; §23.2.4 forbids logic-ctx `_{}` → reconcile with §13180).
 4. **Half-2 convergence** — `<each>` bind: + `buildHandlerExpr` dedup (Family-A; fixes g-expr-event-handler-dead-in-each MED). SCOPING `docs/changes/family-a-converge-half1-...`.
-5. **6nz idiomatic-rewrite findings** — un-triaged inbox (S217 arrived, not processed).
+5. **3 un-triaged intakes CARRIED (in inbox — triage at S218 open):** (a) 6nz `idiomatic-rewrite-findings`; (b) 6nz `each-empty-fallback-leak` BUG; (c) **giti `conditional-markup-in-match-arm`** (NEW — likely render-adjacent to the just-closed GITI-029/030/031 cluster; triage FIRST). The giti/6nz reply+intake cadence is hot — these arrived during S217.
 6. **Multi-user PA MVP — remaining refinements:** user-voice-scrml→-bryan rename; methodology-memory-lift residual; full pa-scrml→pa-base+overlay migration; path-param to `$SCRML_HOME`. **User's step: add Ryan as a scrml-support collaborator (GitHub).**
 7. **Carried:** g-enum-toenum-not-lowered-server-side (MED) · giti three-codegen library-mode cluster · pa-base v2 Part-C · A4/stdlib Phase-3.
 
