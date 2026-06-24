@@ -1,0 +1,30 @@
+<program>
+type Sess:struct = { id: string, project: string, detail: string }
+type Row:struct = { name: string, deltas: int }
+<fleet>: Row[] = []
+<sessions>: Sess[] = []
+<expanded>: string = ""
+function sessionsFor(project) {
+  return @sessions.filter(s => s.project == project)
+}
+function toggleExpand(name) {
+  @expanded = name
+}
+<div class="space-y-3">
+  <each in=@fleet as p key=p.name>
+    <div class="box">
+      <div onclick=toggleExpand(p.name) class="hdr">
+        <span class="name">${p.name}</span>
+      </div>
+      <div class:hidden=(@expanded != p.name) class="hidden drawer">
+        <span class="val">${p.deltas}</span>
+      </div>
+      <div class:hidden=(p.deltas == 0) class="adj">
+        <each in=sessionsFor(p.name) as s key=s.id>
+          <div class="srow">${s.detail}</div>
+        </each>
+      </div>
+    </div>
+  </each>
+</div>
+</program>

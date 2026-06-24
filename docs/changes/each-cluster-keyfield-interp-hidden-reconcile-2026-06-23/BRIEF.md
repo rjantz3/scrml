@@ -1,0 +1,17 @@
+# `<each>` render cluster — GITI-030 (key-field interp) + flogence each-item-hidden-stale
+change-id: `each-cluster-keyfield-interp-hidden-reconcile-2026-06-23`
+
+> **Archived per S136.** Dispatched S217 (2026-06-23) to `scrml-js-codegen-engineer`, isolation:worktree, opus, background — one of 3 parallel render-codegen dispatches (on-mount / each / match). Agent `a296c10168d532450`, base `f5f15009`. Full verbatim prompt in the S217 session transcript (this is the faithful archival copy).
+
+## Brief (substance)
+Two silent (compile-clean, browser-only) `<each>`-item bugs; you own emit-each / list-reconcile (sibling dispatches own on-mount/match — do NOT touch). Standard blocks: MAPS-first-read · STARTUP+PATH-DISCIPLINE (S42/S88/S90/S99/S126, Bash-edits on worktree-absolute paths) · COMMIT-DISCIPLINE (S83) · R26 (S138) · WITHIN-NODE (S211 — 3 parallel dispatches; re-baseline your over-budget fixtures + REPORT exact (fixture,class,raw) for PA hand-reconcile).
+
+- **BUG 1 — GITI-030:** `<each in=@rows key=@.id>` body `${@.id}` (reusing the key field) emits `createTextNode("${_scrml_each_item.id}")` (literal) instead of substituting; non-key fields substitute. Brief's framing: "key field excluded from body-interp substitution; fix: substitute regardless of key=." Repro `<li><code>${@.id}</code> <span>${@.label}</span></li>`. giti repro `ui/repros/repro-29-...`.
+- **BUG 2 — flogence each-item-hidden-stale:** loop-var `${p.*}` text inside an initially-HIDDEN each-item subtree renders STALE, never reconciles on `@arr` replace; visible part reconciles. Sibling of `g-each-item-class-hidden-no-mount-reconcile`. Reconcile/runtime, not codegen.
+
+## Outcome
+- **BUG 1 (GITI-030) — the brief's framing was a MISDIAGNOSIS; agent fixed the actual defect (Rule 4).** The key field substitutes fine in a non-raw element; the trigger is the **raw-content element** (`<code>`/`<pre>`, SPEC §4.17) — the repro put `${@.id}` inside `<code>`. emit-each `renderTemplateChildToJs` ran `rewriteContextualSigil` on the §4.17 raw-content body, half-rewriting `@.id`→`_scrml_each_item.id` → corrupted `createTextNode("${_scrml_each_item.id}")`. **§4.17 (line 1101, normative): inside `<pre>`/`<code>`, `${...}` SHALL NOT be recognized — verbatim.** The brief's requested fix (substitute inside `<code>`) would VIOLATE §4.17 → REJECTED. Fix: raw-content text emits verbatim (`JSON.stringify`, no sigil rewrite) via a threaded `parentIsRawContent`. R26: corruption gone; verbatim `${@.id}`; 73 each-tests green.
+- **BUG 2 — NOT-REPRODUCED at HEAD.** Doesn't reproduce across 5 faithful shapes × 2 set-paths (deep-reactive AND the raw server-load `_scrml_reactive_set(name,rawArray)` flogence emits) × all sequences; even flogence's pre-workaround app.scrml shape is byte-identical to a working minimal. The Bug64/R28-1c fix (S158 `af3175e2`, ~3 wks before flogence's report) appears to have already closed this class. Per R26 discipline: NO fabricated fix — delivered a 6-test GUARD CANARY locking the current-correct reconcile + STOP-surfaced (flogence LIVE repro needed; trigger may be flogence-specific runtime [SSE/channel-driven set] or a stale dist).
+- WITHIN-NODE: NO allowlist change (codegen-internal). Secondary gap surfaced (out of scope): `W-INTERP-IN-RAW-CONTENT` does not fire inside an `<each>` body.
+
+**RESOLVED** (GITI-030) + **guard-canary'd** (flogence-each NOT-REPRODUCED). Landed via PA file-delta (this commit). Agent `191f2162`.

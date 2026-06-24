@@ -81,6 +81,20 @@ export interface EachEngineCtx {
 }
 
 // ---------------------------------------------------------------------------
+// SPEC §4.17 raw-content elements (`<pre>` / `<code>`). Inside a raw-content
+// element body, `${...}` is NOT interpolation — the literal `$`, `{`, `}`
+// characters pass through as text (§4.17 line 1101, normative). The block
+// splitter captures the body as a single text run, so inside an `<each>` body a
+// `<code>${@.id}</code>` child surfaces as a `text` node whose value is the
+// verbatim `${@.id}`. The per-item text emit path MUST NOT run
+// `rewriteContextualSigil` on such text (doing so half-rewrites `@.id` to
+// `_scrml_each_item.id` and corrupts the §4.17 verbatim literal into
+// `${_scrml_each_item.id}` — GITI-030). Mirrors `RAW_CONTENT_ELEMENTS` in
+// block-splitter.js + `RAW_CONTENT_NAMES` in lint-w-interp-in-raw-content.js.
+// ---------------------------------------------------------------------------
+const RAW_CONTENT_ELEMENT_NAMES = new Set(["pre", "code"]);
+
+// ---------------------------------------------------------------------------
 // AST shape (each-block) — mirrors ast-builder.js dispatch output
 // ---------------------------------------------------------------------------
 
@@ -365,6 +379,7 @@ function renderTemplateChildToJs(
   lines: string[],
   indent: string,
   engineCtx: EachEngineCtx | null = null,
+  parentIsRawContent: boolean = false,
 ): void {
   if (!child || typeof child !== "object") return;
 
@@ -372,6 +387,16 @@ function renderTemplateChildToJs(
   if (child.kind === "text") {
     const txt = String((child as any).value ?? (child as any).text ?? "");
     if (!txt.trim()) return;
+    // SPEC §4.17 raw-content (`<pre>`/`<code>`) — emit the body VERBATIM. The
+    // block splitter captured `${@.id}` as literal text (no logic node), so
+    // running `rewriteContextualSigil` here would half-rewrite `@.id` to
+    // `_scrml_each_item.id` and corrupt the §4.17 verbatim literal into the
+    // nonsense `${_scrml_each_item.id}` (GITI-030). Top-level `<code>` already
+    // ships the body verbatim; this keeps the per-item path parity-correct.
+    if (parentIsRawContent) {
+      lines.push(`${indent}${fragmentVar}.appendChild(document.createTextNode(${JSON.stringify(txt)}));`);
+      return;
+    }
     // Non-empty literal text: rewrite `@.` to iterVar, then emit as text node.
     const rewritten = rewriteContextualSigil(txt, iterVarName);
     lines.push(`${indent}${fragmentVar}.appendChild(document.createTextNode(${JSON.stringify(rewritten)}));`);
@@ -450,11 +475,18 @@ function renderTemplateChildToJs(
         [`${indent}${elVar}.textContent = String(${exprRewritten});`], iterVarName, indent,
       )) lines.push(_l);
     } else if (Array.isArray((child as any).children) && (child as any).children.length > 0) {
-      // Bare-body — recurse into children.
+      // Bare-body — recurse into children. SPEC §4.17 — when THIS element is a
+      // raw-content element (`<pre>`/`<code>`), its captured text children must
+      // emit verbatim (no `${...}` interpolation, no `@.`-sigil rewrite), so
+      // flag the child recursion. The flag is local (a raw-content element has
+      // a single text run and no further markup descent), so descendants of a
+      // non-raw element correctly recurse with the flag cleared.
+      const childIsRawContent =
+        RAW_CONTENT_ELEMENT_NAMES.has(tagName.toLowerCase());
       const innerFragVar = `_scrml_frag_${nextLocalId()}`;
       lines.push(`${indent}const ${innerFragVar} = document.createDocumentFragment();`);
       for (const grand of (child as any).children) {
-        renderTemplateChildToJs(grand, iterVarName, _iterIdxName, innerFragVar, lines, indent, engineCtx);
+        renderTemplateChildToJs(grand, iterVarName, _iterIdxName, innerFragVar, lines, indent, engineCtx, childIsRawContent);
       }
       lines.push(`${indent}${elVar}.appendChild(${innerFragVar});`);
     }

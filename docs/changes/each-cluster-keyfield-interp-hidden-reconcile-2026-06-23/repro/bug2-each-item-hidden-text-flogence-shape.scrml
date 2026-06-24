@@ -1,0 +1,15 @@
+<program>
+type Row:struct = { name: string, deltas: int }
+<fleet>: Row[] = []
+<expanded>: string = ""
+<ul>
+  <each in=@fleet as p key=p.name>
+    <li>
+      <span class="hdr">${p.name}</span>
+      <div class="drawer hidden" class:hidden=(@expanded != p.name)>
+        <span class="val">${p.deltas}</span>
+      </div>
+    </li>
+  </each>
+</ul>
+</program>
