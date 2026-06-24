@@ -296,7 +296,19 @@ export function translateExpr(nativeExpr) {
         case ExprKind.Render:
             return makeEscapeHatch("Render", "", nativeExpr.span);
         case ExprKind.MarkupValue:
-            return makeEscapeHatch("MarkupValue", "", nativeExpr.span);
+            // markup-as-value (Pillar 1, SPEC §1.4 / §7.4) in EXPRESSION position
+            // — e.g. a ternary arm `${ cond ? <p>X</p> : "" }` re-parsed inside a
+            // `<match>` / `<engine>` arm body (GITI-032). The native `MarkupValue`
+            // node carries the delegated markup block-stream (`nativeExpr.markup`).
+            // Translate it to the live `{kind:"markup-value", node}` ExprNode that
+            // emit-expr.ts `case "markup-value"` lowers (via emit-lift.js
+            // `emitMarkupValueExpr` → the markup→DOM-node IIFE). Pre-fix this
+            // routed to an EMPTY escape-hatch (`makeEscapeHatch("MarkupValue", "")`)
+            // — the markup body was DROPPED, leaving a malformed `cond ? : ""`
+            // ternary that failed the E-CODEGEN-INVALID-JS gate. This is the
+            // expression-position twin of the top-level path, where ast-builder's
+            // `parseExprWithMarkupValues` already produces the `markup-value` leaf.
+            return translateMarkupValueExpr(nativeExpr);
         case ExprKind.Lift:
             // `Lift` / `Fail` at a genuine expression-CHILD position (rare —
             // `lift` / `fail` are statement-shaped; the statement bridge
@@ -1248,4 +1260,58 @@ function makeEscapeHatch(nativeKind, raw, span) {
         raw,
         span: spanOrZero(span),
     };
+}
+
+// ---------------------------------------------------------------------------
+// markup-as-value in EXPRESSION position (GITI-032)
+// ---------------------------------------------------------------------------
+//
+// A native `MarkupValue` Expr (`<tag>…</tag>` in JS-expression position — a
+// ternary arm, a `${}` interpolation inner expr re-parsed inside a `<match>` /
+// `<engine>` arm body) carries the delegated markup block-stream on
+// `nativeExpr.markup`. Translate it to the LIVE `markup-value` ExprNode
+// (ast.ts:2039 — `{kind:"markup-value", span, node}`) so emit-expr.ts
+// `case "markup-value"` lowers the markup to a real DOM node (the markup→DOM-
+// node IIFE in emit-lift.js `emitMarkupValueExpr`), not a dropped/empty arm.
+//
+// The native→live markup conversion reuses translate-stmt.js's M6.2a bridge
+// `translateMarkupValueToLiveNode` (the SAME conversion the `lift-expr` markup
+// path uses — already wired through normalizeNativeFileAST + codegen). It is
+// pulled by LAZY-require to avoid the static import cycle: translate-stmt.js
+// imports `translateExpr` from this module at the top of the file, so a
+// top-level `import { translateMarkupValueToLiveNode } from "./translate-stmt.js"`
+// would form a load-time cycle. Lazy-require (the pattern translate-stmt.js
+// itself uses for `mapBlocksToNodesViaLazyRequire`) loads the helper at FIRST
+// CALL, by which time both modules have finished top-level eval.
+//
+// COUNTER: `translateMarkupValueToLiveNode(markupValue, counter)` stamps node
+// ids via `counter.next++`. `translateExpr` carries no file id-gen (it is a
+// pure one-expr→one-expr bridge with no counter thread), so a MODULE-LOCAL
+// counter is used. The embedded markup node's `.id` is NOT load-bearing for
+// codegen — `emitCreateElementFromMarkup` allocates its own `_scrml_lift_el_N`
+// vars (genVar), the within-node classifier strips ids, and
+// `normalizeNativeFileAST` keys its visited-set on the object reference (not
+// id). The high base keeps these ids out of any realistic per-file id-gen
+// range so they can never collide with a sibling FileAST node id.
+let _markupValueExprIdCounter = { next: 900_000_000 };
+let _translateMarkupValueToLiveNodeCached = null;
+function translateMarkupValueExpr(nativeExpr) {
+    if (_translateMarkupValueToLiveNodeCached === null) {
+        try {
+            // eslint-disable-next-line global-require
+            const mod = require("./translate-stmt.js");
+            _translateMarkupValueToLiveNodeCached = mod.translateMarkupValueToLiveNode;
+        } catch (_e) {
+            _translateMarkupValueToLiveNodeCached = undefined;
+        }
+    }
+    if (typeof _translateMarkupValueToLiveNodeCached === "function") {
+        const liveNode = _translateMarkupValueToLiveNodeCached(nativeExpr, _markupValueExprIdCounter);
+        if (liveNode !== null && liveNode !== undefined) {
+            return { kind: "markup-value", span: spanOrZero(nativeExpr.span), node: liveNode };
+        }
+    }
+    // Defensive: bridge unreachable / produced no node. Keep the pre-fix
+    // behavior (empty escape-hatch) so codegen stays crash-free.
+    return makeEscapeHatch("MarkupValue", "", nativeExpr.span);
 }

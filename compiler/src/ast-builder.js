@@ -164,6 +164,60 @@ function isHtmlFragment(expr) {
 }
 
 /**
+ * GITI-032 — markup-as-value (Pillar 1, §1.4/§7.4) NESTED inside a larger JS
+ * expression (a ternary arm `cond ? <p>X</p> : ""`, a logical `@show && <p>X</p>`,
+ * etc.). `isHtmlFragment` fires on such an expr (it contains `</tag>` / a newline-
+ * plus-`<tag>`), which would route it to a raw `html-fragment` node — dropping the
+ * markup at render. But post-S201 these ARE parseable markup-as-value expressions:
+ * `parseExprWithMarkupValues` (via the closure `safeParseExprToNode`) recovers each
+ * markup span to a `markup-value` ExprNode leaf that emit-expr.ts lowers to a real
+ * DOM node.
+ *
+ * The discriminator is start-anchored: a WHOLE-body markup-as-value (`<p>x</p>` —
+ * leading `<`) is handled by the markup-element child path, and a genuinely-raw
+ * leading-markup HTML fragment also starts with `<`. We ONLY reroute when the expr
+ * does NOT start with markup (it leads with a JS expression) AND the parsed tree
+ * actually contains a `markup-value` leaf. The `<match>` arm bare-body dodges this
+ * via its nativeParseFile re-parse; the `<engine>` state-child body uses the
+ * structural children directly, so this gate is what brings the engine path to
+ * parity (the shared display mechanism in emit-variant-guard already routes both
+ * surfaces through the node-aware _scrml_render_value helper).
+ *
+ * `exprNodeHasMarkupValue` — recursively walk a parsed ExprNode tree for any
+ * `markup-value` kind. Bounded by the AST shape (no cycles).
+ */
+function exprNodeHasMarkupValue(node) {
+  if (node === null || node === undefined || typeof node !== "object") return false;
+  if (node.kind === "markup-value") return true;
+  for (const key of Object.keys(node)) {
+    const v = node[key];
+    if (Array.isArray(v)) {
+      for (const item of v) {
+        if (exprNodeHasMarkupValue(item)) return true;
+      }
+    } else if (v && typeof v === "object") {
+      if (exprNodeHasMarkupValue(v)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Predicate gate (start-anchored): the expr is NOT whole-body leading markup
+ * (`<...`) but DOES contain markup tokens — i.e. a candidate markup-as-value
+ * nested in a JS expression. Cheap textual pre-check; the caller still confirms
+ * with a real parse (`exprNodeHasMarkupValue` on the safeParseExprToNode result)
+ * before treating it as a bare-expr.
+ */
+function looksLikeNestedMarkupValueExpr(expr) {
+  if (!expr || typeof expr !== "string") return false;
+  const t = expr.trim();
+  if (!t) return false;
+  if (/^\s*</.test(t)) return false; // leading markup — handled elsewhere
+  return /<\s*[A-Za-z_]/.test(t);     // markup opener somewhere inside
+}
+
+/**
  * §4.15 — Scrml-defined structural-DECLARATION elements registry. These 9
  * elements are declaration-shapes (NOT markup-as-value): a state-machine
  * definition (<engine>), channel/page/schema/auth declarations, an errors
@@ -8782,6 +8836,19 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             span,
           };
         }
+        // GITI-032 — markup-as-value NESTED in a JS expression (ternary arm,
+        // logical short-circuit) leads with the JS expression, not `<`. It IS a
+        // parseable markup-as-value expression post-S201, so route it to bare-expr
+        // (the markup-value exprNode emit-expr lowers to a real DOM node) instead
+        // of a raw html-fragment that would drop the markup. Confirm with a real
+        // parse before committing — a textual false-positive cedes to the
+        // html-fragment path below.
+        if (looksLikeNestedMarkupValueExpr(expr)) {
+          const mvNode = safeParseExprToNode(expr, 0);
+          if (exprNodeHasMarkupValue(mvNode)) {
+            return { id: ++counter.next, kind: "bare-expr", expr, exprNode: mvNode, span };
+          }
+        }
         if (isHtmlFragment(expr)) {
           // §4.15 — Structural-element misplacement in `${...}` logic-body context.
           // The leading tag opener is a scrml-defined structural element (one of
@@ -12191,6 +12258,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             exprNode: safeParseExprToNode(innerExpr, 0),
             span,
           });
+        } else if (looksLikeNestedMarkupValueExpr(expr) && exprNodeHasMarkupValue(safeParseExprToNode(expr, 0))) {
+          // GITI-032 — markup-as-value nested in a JS expression (see the
+          // parseOneStatement default-branch twin). Route to bare-expr so the
+          // markup-value exprNode lowers to a real DOM node, not a raw fragment.
+          nodes.push({ id: ++counter.next, kind: "bare-expr", expr, exprNode: safeParseExprToNode(expr, 0), span });
         } else if (isHtmlFragment(expr)) {
           // §4.15 — Structural-element misplacement in `${...}` logic-body context
           // (top-level loop). See parseOneStatement html-fragment fallback for the

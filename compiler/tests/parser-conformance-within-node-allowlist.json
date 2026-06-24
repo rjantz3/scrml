@@ -4030,9 +4030,10 @@
     "SPAN-COORD": 6
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-component-lowercase-ghost-058.scrml": {
-    "EXTRA-FIELD": 2,
+    "EXTRA-FIELD": 3,
     "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 2,
+    "KIND-NAME": 1,
+    "MISSING-FIELD": 4,
     "SPAN-COORD": 4
   },
   "samples/compilation-tests/gauntlet-s19-phase4-markup/phase4-component-missing-prop-053.scrml": {

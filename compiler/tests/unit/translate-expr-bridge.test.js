@@ -51,6 +51,9 @@ const LIVE_KINDS = new Set([
     "ident", "lit", "array", "object", "spread", "unary", "binary", "assign",
     "ternary", "member", "index", "call", "new", "lambda", "cast", "match-expr",
     "sql-ref", "input-state-ref", "escape-hatch", "reset-expr", "map-lit",
+    // GITI-032: a native MarkupValue (markup-as-value in EXPRESSION position)
+    // now translates to a live `markup-value` ExprNode (was an empty escape-hatch).
+    "markup-value",
 ]);
 
 // =============================================================================
@@ -545,7 +548,6 @@ describe("§9 — escape-hatch passthrough (native kinds with no live target)", 
         ExprKind.Sequence,
         ExprKind.Yield,
         ExprKind.Render,
-        ExprKind.MarkupValue,
         ExprKind.Lift,
         ExprKind.Fail,
     ];
@@ -556,6 +558,23 @@ describe("§9 — escape-hatch passthrough (native kinds with no live target)", 
             expect(out.nativeKind).toBe(kind);
         });
     }
+
+    // GITI-032 — MarkupValue is NO LONGER escape-hatched. A native MarkupValue
+    // (markup-as-value in EXPRESSION position, e.g. a ternary arm
+    // `${ cond ? <p>X</p> : "" }` re-parsed inside a `<match>` / `<engine>` arm
+    // body) now translates to the LIVE `markup-value` ExprNode (ast.ts:2039) that
+    // emit-expr.ts `case "markup-value"` lowers to a real DOM node. Pre-fix the
+    // empty escape-hatch dropped the markup entirely, producing a malformed
+    // `cond ? : ""` ternary that failed the E-CODEGEN-INVALID-JS gate.
+    test("MarkupValue translates to a live markup-value ExprNode (not escape-hatch)", () => {
+        const out = translateExpr({ kind: ExprKind.MarkupValue, span: null });
+        expect(out.kind).toBe("markup-value");
+        // The embedded markup node is present (defensive empty markup on a
+        // payload-less synthetic; a source-available MarkupValue carries the
+        // recovered element tree).
+        expect(out.node).toBeDefined();
+        expect(out.node.kind).toBe("markup");
+    });
 
     test("param/body-stub support nodes escape-hatch defensively", () => {
         for (const kind of [ExprKind.RestElement, ExprKind.AssignmentPattern, ExprKind.BlockStub]) {

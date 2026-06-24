@@ -94,6 +94,26 @@ export interface EachEngineCtx {
 // ---------------------------------------------------------------------------
 const RAW_CONTENT_ELEMENT_NAMES = new Set(["pre", "code"]);
 
+// GITI-032 — recursively detect a `markup-value` leaf anywhere in a parsed
+// ExprNode tree (markup-as-value in expression position, Pillar 1 §1.4/§7.4).
+// Used to defer the per-item interpolation case the each path does not yet lower
+// with iter-var scope (see the bare-expr branch in renderTemplateChildToJs).
+function exprNodeHasMarkupValue(node: any): boolean {
+  if (node === null || node === undefined || typeof node !== "object") return false;
+  if (node.kind === "markup-value") return true;
+  for (const key of Object.keys(node)) {
+    const v = (node as Record<string, unknown>)[key];
+    if (Array.isArray(v)) {
+      for (const item of v) {
+        if (exprNodeHasMarkupValue(item)) return true;
+      }
+    } else if (v && typeof v === "object") {
+      if (exprNodeHasMarkupValue(v)) return true;
+    }
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // AST shape (each-block) — mirrors ast-builder.js dispatch output
 // ---------------------------------------------------------------------------
@@ -514,6 +534,22 @@ function renderTemplateChildToJs(
       // but are less common in iteration body context. For Landing 1
       // baseline, route bare-expr through; other shapes get a hint.
       if (stmt.kind === "bare-expr") {
+        // GITI-032 (deferred sub-case) — a markup-as-value NESTED in this
+        // per-item interpolation (`${ @. == "a" ? <span>X</span> : "" }`). The
+        // ast-builder gate now hands us a markup-value-bearing exprNode (was a
+        // silently-dropped raw html-fragment pre-GITI-032). The match/engine arm
+        // paths lower this via emitMarkupValueExpr, but the EACH per-item path
+        // needs iter-var (`@.`) scope threaded INTO the markup-value DOM-build
+        // (emitCreateElementFromMarkup does not yet rewrite `@.` to the iter
+        // binding), so a full lowering is a separate follow-on. Until then,
+        // PRESERVE the pre-GITI-032 clean-compile behavior (skip) rather than
+        // emit a raw `String(< span > … )` that fails the E-CODEGEN-INVALID-JS
+        // gate. Surfaced as a deferred item; NOT a silent correctness change vs.
+        // the prior behavior (which also did not render the markup).
+        if (exprNodeHasMarkupValue((stmt as any).exprNode)) {
+          lines.push(`${indent}// each: markup-as-value in per-item interpolation not yet lowered (GITI-032 follow-on) — skipped`);
+          return;
+        }
         // ExprNode-preference contract (mirrors emit-html.ts:1888 + the
         // `makeBareExpr` bridge comment in native-parser/translate-stmt.ts:
         // "codegen prefers exprNode"). The legacy ast-builder populates a

@@ -533,13 +533,23 @@ function emitArmWireFunction(
     lines.push(`  {`);
     lines.push(`    const el = _root.querySelector('[data-scrml-logic=${JSON.stringify(placeholderId)}]');`);
     lines.push(`    if (el) {`);
+    // markup-as-value (§1.4/§7.4 Pillar 1) in EXPRESSION position — a ternary
+    // arm `${ cond ? <p>X</p> : "" }` re-parsed inside this arm body now lowers
+    // its markup consequent to a real DOM node (emit-lift `emitMarkupValueExpr`).
+    // Route the display through the node-aware `_scrml_render_value(el, v)`
+    // runtime helper (the SAME path the top-level interpolation uses —
+    // emit-event-wiring.ts:1294, S201), NOT a bare `el.textContent =` which would
+    // stringify a DOM node to "[object HTMLParagraphElement]". For string /
+    // primitive values `_scrml_render_value` is byte-identical to the prior
+    // `el.textContent =` path, so this is safe for every existing arm-body
+    // interpolation (GITI-032).
     if (varRefs.length > 0) {
       // Reactive: bind initial value + subscribe via _scrml_effect (returns dispose).
-      lines.push(`      el.textContent = ${rewrittenExpr};`);
-      lines.push(`      _disposers.push(_scrml_effect(function() { el.textContent = ${rewrittenExpr}; }));`);
+      lines.push(`      _scrml_render_value(el, ${rewrittenExpr});`);
+      lines.push(`      _disposers.push(_scrml_effect(function() { _scrml_render_value(el, ${rewrittenExpr}); }));`);
     } else {
       // No reactive deps — write once. No dispose needed.
-      lines.push(`      el.textContent = ${rewrittenExpr};`);
+      lines.push(`      _scrml_render_value(el, ${rewrittenExpr});`);
     }
     lines.push(`    }`);
     lines.push(`  }`);

@@ -79,9 +79,13 @@ describe("g-shorthand-interp-match-arm-codegen §1: `${...}` is lowered", () => 
     cleanup();
   });
 
-  test("the Failed wire sets el.textContent from the `reason` payload", () => {
+  test("the Failed wire renders the `reason` payload via _scrml_render_value", () => {
     const { clientJs, cleanup } = compileSrc(src, "simac-4");
-    expect(clientJs).toMatch(/el\.textContent\s*=\s*reason/);
+    // GITI-032: arm-body `${...}` display routes through the node-aware
+    // _scrml_render_value(el, v) helper (parity with the top-level S201 path),
+    // NOT a bare `el.textContent =` (which would stringify a markup-value DOM
+    // node). Byte-identical to textContent for string/primitive values.
+    expect(clientJs).toMatch(/_scrml_render_value\(el,\s*reason\)/);
     cleanup();
   });
 });
@@ -165,8 +169,9 @@ describe("g-shorthand-interp-match-arm-codegen §3: no regression on other short
     ].join("\n");
     const { result, clientJs, cleanup } = compileSrc(src, "simac-value");
     expect(errorCodes(result)).not.toContain("E-CODEGEN-INVALID-JS");
-    // the call is wired as a logic interpolation (data-scrml-logic + textContent = cap())
-    expect(clientJs).toMatch(/el\.textContent\s*=\s*_scrml_cap_\d+\(\)/);
+    // the call is wired as a logic interpolation (data-scrml-logic +
+    // _scrml_render_value(el, cap()) — GITI-032 node-aware display parity)
+    expect(clientJs).toMatch(/_scrml_render_value\(el,\s*_scrml_cap_\d+\(\)\)/);
     cleanup();
   });
 
