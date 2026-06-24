@@ -1,0 +1,13 @@
+<program db="./flogence.db">
+
+${
+  server function* fspDeltas() {
+    let since = Number(route.lastEventId ?? 0)
+    for (let row of ?{`SELECT seq, kind FROM delta_log WHERE seq > ${since} ORDER BY seq ASC`}.all()) {
+      yield { event: "delta", id: row.seq, data: row }
+    }
+  }
+}
+
+<h1>FSP host</h1>
+</program>

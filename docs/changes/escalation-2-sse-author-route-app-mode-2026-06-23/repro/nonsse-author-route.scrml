@@ -1,0 +1,10 @@
+<program db="./flogence.db">
+
+${
+  function getRows() route="/api/rows" {
+    return ?{`SELECT seq, kind FROM delta_log ORDER BY seq ASC`}.all()
+  }
+}
+
+<h1>host</h1>
+</program>

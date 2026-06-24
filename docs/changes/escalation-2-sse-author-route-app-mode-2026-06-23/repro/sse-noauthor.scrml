@@ -1,0 +1,12 @@
+<program db="./flogence.db">
+
+${
+  server function* fspDeltas() {
+    for (let row of ?{`SELECT seq FROM delta_log ORDER BY seq ASC`}.all()) {
+      yield { event: "delta", id: row.seq, data: row }
+    }
+  }
+}
+
+<h1>host</h1>
+</program>

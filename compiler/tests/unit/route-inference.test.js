@@ -1931,7 +1931,12 @@ describe("§20 — CPS transformation: server/client boundary splitting", () => 
 // ---------------------------------------------------------------------------
 
 describe("§19 — explicit route= and method= attributes", () => {
-  test("server function with route= uses explicit route as generatedRouteName", () => {
+  // escalation-2 (S216): an author `route=` is the request PATH (carried in
+  // `explicitRoute`), NOT the JS export binding NAME. `generatedRouteName` is
+  // ALWAYS a valid `__ri_route_*` identifier — emitting the path AS the binding
+  // name produced invalid JS (`export const /oauth/callback`). This test
+  // previously locked that buggy behavior.
+  test("server function with route= keeps generatedRouteName a valid identifier; path in explicitRoute", () => {
     const fn = makeFunctionDecl({
       name: "oauthCallback",
       isServer: true,
@@ -1946,7 +1951,10 @@ describe("§19 — explicit route= and method= attributes", () => {
 
     const route = getRoute(routeMap, "/test/app.scrml", 10);
     expect(route.boundary).toBe("server");
-    expect(route.generatedRouteName).toBe("/oauth/callback");
+    // The JS binding name is a valid identifier, never the author path.
+    expect(route.generatedRouteName).not.toContain("/");
+    expect(route.generatedRouteName).toContain("__ri_route_oauthCallback");
+    // The author path is preserved on explicitRoute (emit-server mounts it there).
     expect(route.explicitRoute).toBe("/oauth/callback");
     expect(route.explicitMethod).toBe("GET");
   });

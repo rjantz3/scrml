@@ -3661,8 +3661,19 @@ export function runRI(input: RIInput): RIOutput {
     // emit-server emits it as a plain callable server function instead.
     const _isChannelWsHandler = deduped.some(r => r.kind === "channel-ws-handler");
     const hasExplicitRoute = !!(record.fnNode as any).route;
+    // The generated route NAME is the JS binding identifier under which the
+    // route record is exported (`export const <generatedRouteName> = { path, ... }`).
+    // It MUST always be a valid JS identifier. An author-declared `route="/path"`
+    // is the request PATH, carried separately in `explicitRoute` (emit-server
+    // honors it for the `path:` field). Conflating the two — using the author
+    // path AS the binding name — emits invalid JS (`export const /fsp/deltas`).
+    // So always synthesize a `__ri_route_*` identifier here; the author path
+    // never becomes the binding name. (escalation-2, S216 — the §12.3 carve-out:
+    // an author `route=` on a `server function*` SSE / `handle()` is honored as
+    // a stable foreign-facing contract URL in application mode, mounted at the
+    // author path while still exported under a compiler-internal JS binding.)
     const generatedRouteName = (isServer && !_isChannelWsHandler)
-      ? (hasExplicitRoute ? (record.fnNode as any).route : generateRouteName(record.fnNode.name ?? "anon"))
+      ? generateRouteName(record.fnNode.name ?? "anon")
       : null;
 
     const serverEntrySpan = isServer ? record.fnNode.span : null;
