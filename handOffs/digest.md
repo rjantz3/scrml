@@ -1,9 +1,9 @@
-<!-- @digest head=ca12a295 delta-seq=55 -->
+<!-- @digest head=d34e473a delta-seq=56 -->
 # scrml — session-start digest (@generated — do NOT hand-edit)
 
 > ⚠ **FRESHNESS GUARD (PA — read this first).** This digest is a mechanical projection reflecting
-> **HEAD `ca12a295`** + delta-log **[55]**. To check freshness, run `bun scripts/state.ts` and read
-> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `ca12a295`
+> **HEAD `d34e473a`** + delta-log **[56]**. To check freshness, run `bun scripts/state.ts` and read
+> its `digest:` line — it is SOURCE-based (the digest is current unless a commit since stamp `d34e473a`
 > touched a source it projects from — known-gaps · delta-log · maps · version; the digest's own
 > commit does NOT stale it). **If it reports STALE, DISTRUST this digest** and fall back to the
 > authoritative reads (master-list §0 + hand-off.md + delta-log tail). Every line below is
@@ -13,27 +13,18 @@
 > It thins the VOLATILE re-derivation only (board · rulings · activity); the expert reads
 > (PRIMER · SPEC-INDEX · pa.md Rules) are UNAFFECTED — always cold.
 
-## Board — from `@gap` tokens @ `ca12a295`
+## Board — from `@gap` tokens @ `d34e473a`
 - **HIGH 0** · MED 13 · LOW 13 · Nominal 8
 - Named open HIGHs: _none_
 
-## Recent rulings — last 5 `rule` (delta-log S215 — 2026-06-23)
-- `[31]` find/rule · **Bug-51 fix S215-ADVERSARIAL-GATE run by PA-as-lander (`/code-review` 3-angle finder fan-out) — caught real adjacents; scary headline EMPIRICALLY REFUTED.** Fi… → known-gaps §S216 + /tmp/bug51-toenum
-- `[35]` rule · **§52 server-cell decl-RHS `?{}` = LOAD (Pattern C) RATIFIED (user "rule LOAD, ship param-free first").** Disposition A from the §52 DD. The "conflict" was narr… → design-insights + DD doc
-- `[39]` rule · **Escalation-#2 RATIFIED (user "ratify both") — author `route=` on `server function*` allowed in APP mode (narrow BYOB serve-side carve-out).** scrml honors an… → design-insights
-- `[40]` rule · **dpa-003 RATIFIED (user "ratify both") — foreign-code `_{}` OUT-typing = `<api>`-proven hybrid; inline+sidecar COEXIST by process-lifetime.** (a) eliminate inf… → design-insights + dpa-queue
-- `[48]` disp/rule · **giti EACH + MATCH clusters DISPATCHED (user greenlight "each/match, parallel") + IP=private voice-fork SETTLED.** (1) EACH-cluster agent **a296c101** (change-… → agents a296c101+a9cdf450 + DD doc
+## Recent rulings — last 0 `rule` (delta-log S218 — 2026-06-24)
+- _(none in the latest session)_
 
-## Recent activity — last 6 `disp`/`land`/`find`/`state`
-- `[50]` state · **IP MVP increment-2 DONE — agents-distribution (the HARD gap) CLOSED.** Staged 18 scrml-relevant PA agents (all of `~/.claude/agents/` EXCEPT cementer-go-engin… → scrml-support/agents/ + README
-- `[51]` land · **GITI-031 match-on-subfield FIXED + LANDED (PA-commit, agent a9cdf450 @7f4670a3).** `<match on=@cell.state>` was emitting `_dispatch(_scrml_reactive_get("cell"… → match commit
-- `[52]` land · **giti render cluster COMPLETE — each (GITI-030) + on-mount (GITI-029 + g-onmount) LANDED** (match GITI-031 was [51]). **GITI-030** (each agent a296c101 @191f21… → commits 7bf92bf1 + on-mount
-- `[53]` state · **S217 WRAP.** Combined full-suite GREEN 25007/0 (1063 files) — within-node re-baseline + all 4 codegen landings hold. **5 commits this session** (escalation-2… → S217 close
-- `[54]` land · **Ryan PR#1 round-2 + #2 CSRF ADOPTED + LANDED (user "land and push Ryan's work").** First external-contributor landing. **#1** (`--no-ff merge` ryan/claude/fix… → b2bf9959 + d706f111
-- `[55]` state · **S217 FULLY WRAPPED (post-Ryan-landing finalize).** All work committed + pushed (origin `90d4c23b`+; coherence 0/0). Digest regen at settled HEAD (the [54] app… → S217 finalize
+## Recent activity — last 1 `disp`/`land`/`find`/`state`
+- `[56]` disp · **GITI-032 (HIGH) DISPATCHED — ternary-returning-markup dropped inside a `<match>` arm body.** PA R26-reverse-VERIFIED GENUINE @HEAD ca12a295 before dispatch: `… → BRIEF.md + agent a315ec6b
 
 ## State
-- Version: 0.7.0 · maps: 1 commits behind HEAD (watermark 489951aa, HEAD ca12a295)
+- Version: 0.7.0 · maps: 3 commits behind HEAD (watermark 489951aa, HEAD d34e473a)
 - Recent wraps:
   - 489951aa chore(s217): wrap-finalize — digest regen at settled HEAD + 3 intakes carried
   - 6c5c0d58 chore(s216): wrap — close + bookkeeping (hand-off close, changelog S216, master-list §0 [HIGH 1->0], known-gaps HIGH-flip + §0 regen, delta-log [39-40], dpa-queue+artifact ratification flips, 3 inbox->read)
