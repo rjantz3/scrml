@@ -15,7 +15,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 5 |
+| HIGH | 6 |
 | MED | 23 |
 | LOW | 15 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -2535,3 +2535,6 @@ Same bug class as the now-fixed g-emit-lift-markup-text-interp, but on the EACH 
 
 ### G-IF-CHAIN-BRANCH-DISPLAY-NULL-INTERP — `if=`/`else-if=`/`else` chain branches in display-mode have the same latent null-interp gap as the now-fixed single `if=` — `NEW S220 (ss20 item-1 deferred finding); MED`
 The g-if-guard fix (item 1) gated the inner `${@x.field}` effect for a single `if=(@x is some)` display-toggle. An `if=`/`else-if=`/`else` CHAIN branch (a separate node kind, brief-excluded) carrying reactive interpolation over a null cell has the same latent null-access gap on first mount. Extend the item-1 display-mode gate to the if-chain branch node kind. <!-- @gap id=g-if-chain-branch-display-null-interp sev=MED status=open -->
+
+### G-PAREN-TERNARY-OPERAND-PAREN-DROPPED — codegen drops the parens around a parenthesized ternary used as a binary-`+` operand → precedence flip → trailing operand silently lost — `NEW S220 (flogence S14; PA-verified HIGH); HIGH; codegen silent-wrong`
+flogence S14: `const stored = (cond ? "[" + br + "] " : "") + body` emitted (PA-VERIFIED on HEAD, `/tmp/flogence-ternary/`) `() => …cond… ? "[" + br + "] " : "" + body` — **the parens around the ternary were DROPPED**, so `(ternary) + body` became a ternary whose ELSE-branch is `"" + body`; when `cond` is true the `+ body` is LOST. Silent-wrong (compiles + runs, produces truncated data). The control `"[" + br + "] " + body` (no leading paren-group) emits correctly. **Root:** the expression serializer (`rewrite.ts` / `emit-expr.ts`) does not re-parenthesize a ternary (lower-precedence) operand when re-emitting a binary expression. **paren-expression-serialization family** (cf. S210 `g-paren-binary-group` `d84e85d2` + the call-site literal mis-serializer). Fix: parenthesize an operand whose top operator has lower precedence than the enclosing binary op. **S215: the fix must NOT over-parenthesize / regress other expr shapes — adversarial pass mandatory.** Workaround (flogence, shipped): bind the ternary to a `const` first. Repro `/tmp/flogence-ternary/repro.scrml` (use a non-`<br>` cell name — `<br>` collides with the HTML void element). <!-- @gap id=g-paren-ternary-operand-paren-dropped sev=HIGH status=open -->
