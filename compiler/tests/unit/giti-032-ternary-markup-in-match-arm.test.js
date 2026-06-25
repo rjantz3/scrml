@@ -160,14 +160,12 @@ describe("GITI-032 — engine state-child arm body (shared-helper parity)", () =
 });
 
 // ---------------------------------------------------------------------------
-// Blast-radius guard: markup-as-value NESTED in an <each> per-item interpolation
-// is a SEPARATE follow-on (the each path needs iter-var `@.` scope threaded into
-// the markup-value DOM-build, which emitCreateElementFromMarkup does not yet do).
-// The GITI-032 ast-builder gate now hands the each path a markup-value-bearing
-// exprNode (pre-fix it was a silently-dropped raw html-fragment). emit-each
-// DEFERS it with a skip marker rather than emitting an invalid raw `String(< span
-// > … )` — so the each shape stays clean-compile (no E-CODEGEN-INVALID-JS
-// regression), matching the pre-fix render outcome (markup not yet shown).
+// markup-as-value in an <each> per-item interpolation. The GITI-032 ast-builder
+// gate hands the each path a markup-value-bearing exprNode; the ss17 item-2 fix
+// (emitEachPerItemMarkupValue) now LOWERS it — builds the markup DOM, resolves
+// the iter-scope `@.` to the item binding, and live-keys it on reconcile —
+// instead of the prior deferred skip marker. Still clean-compile (no raw
+// tokenizer-spaced `< span >` leak, no E-CODEGEN-INVALID-JS).
 // ---------------------------------------------------------------------------
 
 const EACH = [
@@ -181,13 +179,22 @@ const EACH = [
   "</program>",
 ].join("\n");
 
-describe("GITI-032 — markup-value in an <each> per-item interpolation (deferred, non-regressing)", () => {
+describe("GITI-032 — markup-value in an <each> per-item interpolation (ss17 item-2: lowered)", () => {
   test("compiles clean — no E-CODEGEN-INVALID-JS (raw `< span >` is not emitted)", () => {
     const { errors, clientJs } = compileToClient(EACH, "giti032-each");
     expect(errors.filter((e) => e.code === "E-CODEGEN-INVALID-JS")).toHaveLength(0);
     // The markup must NOT leak as a raw tokenizer-spaced fragment.
     expect(clientJs).not.toMatch(/<\s+span\s+>/);
-    // The deferred-skip marker documents the gap in the emitted output.
-    expect(clientJs).toContain("markup-as-value in per-item interpolation not yet lowered");
+  });
+
+  test("markup-value is now LOWERED (DOM build + live-keyed wrapper), not deferred", () => {
+    const { clientJs } = compileToClient(EACH, "giti032-each-lowered");
+    // The deferred-skip marker is GONE — the real lowering replaced it.
+    expect(clientJs).not.toContain("markup-as-value in per-item interpolation not yet lowered");
+    // The markup DOM is built: a <span> element + its "FIRST" text node.
+    expect(clientJs).toContain('document.createElement("span")');
+    expect(clientJs).toContain('document.createTextNode("FIRST")');
+    // A stable per-item wrapper carries the live-keyed markup-value slot.
+    expect(clientJs).toContain('data-scrml-mv');
   });
 });

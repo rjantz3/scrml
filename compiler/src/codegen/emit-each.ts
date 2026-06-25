@@ -391,6 +391,157 @@ export function emitEachMountHtml(node: EachBlockAstNode, _ctx: CompileContext):
  * this function substitutes `@.` and the optional `as name` with the
  * runtime-iteration-variable binding.
  */
+// ---------------------------------------------------------------------------
+// g-each-peritem-markup-value-ternary (GITI-032 follow-on, 2026-06-25) — lower a
+// markup-as-value (Pillar 1, SPEC §1.4 / §7.4) that appears in a per-item `<each>`
+// interpolation (`${ @.active ? <span>ON ${@.label}</span> : "" }`).
+//
+// The match/engine arm paths lower a markup-value ternary via emitMarkupValueExpr
+// (emit-expr.ts markup-value case). The each per-item path needs TWO extra things
+// those paths do not: (a) `@.field` iter-scope must lower to the factory binding,
+// and (b) the markup-value must re-render on a keyed reconcile (toggle / replace).
+// Pre-fix the each path SKIPPED markup-values entirely (clean compile, non-render).
+//
+// Lowering (all contained in the each machinery — emit-lift's shared markup-value
+// codegen is reused UNCHANGED):
+//   1. deep-clone the exprNode (codegen must not mutate the shared AST), then walk
+//      it: rewrite every `@.field` ident name -> `<iterVar>.field`, and SPLIT each
+//      markup TEXT child carrying `${...}` into alternating text + logic(bare-expr)
+//      children so emitCreateElementFromMarkup interpolates them (it renders a raw
+//      text child's `${...}` literally — a pre-existing gap that also affects match
+//      arms; here the split feeds it parsed, iter-scope-lowered interpolation nodes).
+//   2. emit the ternary via emitExprField (the markup arm routes through
+//      emitMarkupValueExpr -> a DOM-node IIFE; the string arm stays a string).
+//   3. mount a stable per-item wrapper element + a live-keyed `_scrml_effect`
+//      (maybeWrapEachPerItemEffect) that re-resolves the item by key, re-evaluates
+//      the value, and replaceChildren() with the built node (or text / nothing).
+//      The rebuild-on-reconcile is required because the CONDITION can flip
+//      (active -> inactive removes the markup), so a single build cannot suffice.
+// ---------------------------------------------------------------------------
+
+/** Split a markup-text string into alternating literal / `${expr}` parts. */
+function splitMarkupTextInterp(value: string): Array<{ type: "text" | "expr"; v: string }> {
+  const parts: Array<{ type: "text" | "expr"; v: string }> = [];
+  let i = 0;
+  const n = value.length;
+  let buf = "";
+  while (i < n) {
+    if (value[i] === "$" && i + 1 < n && value[i + 1] === "{") {
+      if (buf) { parts.push({ type: "text", v: buf }); buf = ""; }
+      let depth = 1;
+      let j = i + 2;
+      while (j < n && depth > 0) {
+        const c = value[j];
+        if (c === "{") depth++;
+        else if (c === "}") depth--;
+        if (depth === 0) break;
+        j++;
+      }
+      parts.push({ type: "expr", v: value.slice(i + 2, j) });
+      i = j + 1;
+    } else {
+      buf += value[i];
+      i++;
+    }
+  }
+  if (buf) parts.push({ type: "text", v: buf });
+  return parts;
+}
+
+/**
+ * Replace markup TEXT children carrying `${...}` with alternating text + logic
+ * (bare-expr) children, iter-scope-lowering each interpolation interior so
+ * `@.field` -> `<iterVar>.field`. emitCreateElementFromMarkup renders the logic
+ * children as interpolated text nodes (the raw-text path would emit `${...}`
+ * literally). On a parse failure the interior is kept as a literal (best effort).
+ */
+function splitEachMarkupTextChildren(children: any[], iterVarName: string): any[] {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { parseExprToNode } = require("../expression-parser.ts") as {
+    parseExprToNode: (r: string, f: string, o: number) => any;
+  };
+  const out: any[] = [];
+  for (const ch of children) {
+    if (ch && ch.kind === "text" && typeof ch.value === "string" && ch.value.includes("${")) {
+      for (const p of splitMarkupTextInterp(ch.value)) {
+        if (p.type === "text") {
+          if (p.v) out.push({ kind: "text", value: p.v });
+        } else {
+          const lowered = rewriteContextualSigil(p.v.replace(/@\s*\.\s*/g, "@."), iterVarName);
+          let node: any = null;
+          try { node = parseExprToNode(lowered, "", 0); } catch { node = null; }
+          if (node && typeof node === "object" && node.kind !== "escape-hatch") {
+            out.push({ kind: "logic", body: [{ kind: "bare-expr", exprNode: node }] });
+          } else {
+            // Unparseable interior — keep the (lowered) literal rather than drop it.
+            out.push({ kind: "text", value: "${" + lowered + "}" });
+          }
+        }
+      }
+    } else {
+      out.push(ch);
+    }
+  }
+  return out;
+}
+
+/**
+ * Recursively rewrite a (cloned) markup-value-bearing exprNode for the each
+ * per-item scope: lower `@.field` ident names to the iter binding and split
+ * markup-text `${...}` interpolations into parsed, iter-scope-lowered children.
+ */
+function rewriteEachScopeInExprNode(n: any, iterVarName: string): void {
+  if (!n || typeof n !== "object") return;
+  if (Array.isArray(n)) { for (const x of n) rewriteEachScopeInExprNode(x, iterVarName); return; }
+  if (n.kind === "ident" && typeof n.name === "string" && n.name.includes("@")) {
+    n.name = rewriteContextualSigil(n.name.replace(/@\s*\.\s*/g, "@."), iterVarName);
+  }
+  if (n.kind === "markup" && Array.isArray(n.children)) {
+    n.children = splitEachMarkupTextChildren(n.children, iterVarName);
+  }
+  for (const k of Object.keys(n)) {
+    const v = (n as Record<string, unknown>)[k];
+    if (v && typeof v === "object") rewriteEachScopeInExprNode(v, iterVarName);
+  }
+}
+
+/**
+ * Emit a per-item markup-value interpolation: a stable wrapper element + a
+ * live-keyed effect that (re)builds the markup-value into it on reconcile.
+ */
+function emitEachPerItemMarkupValue(
+  exprNode: any,
+  iterVarName: string,
+  fragmentVar: string,
+  lines: string[],
+  indent: string,
+): void {
+  // Deep-clone so the shared AST is not mutated (codegen may revisit it), then
+  // lower iter-scope + split markup-text interpolations.
+  const clone = JSON.parse(JSON.stringify(exprNode));
+  rewriteEachScopeInExprNode(clone, iterVarName);
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { emitExprField } = require("./emit-expr.ts") as {
+    emitExprField: (n: any, fb: string, c: Record<string, unknown>) => string;
+  };
+  const valueExpr = emitExprField(clone, "", { mode: "client" });
+  const wrapVar = `_scrml_each_mv_${nextLocalId()}`;
+  const valVar = `_scrml_mv_v_${nextLocalId()}`;
+  lines.push(`${indent}const ${wrapVar} = document.createElement("span");`);
+  lines.push(`${indent}${wrapVar}.setAttribute("data-scrml-mv", "");`);
+  lines.push(`${indent}${fragmentVar}.appendChild(${wrapVar});`);
+  // The rebuild body re-evaluates the markup-value and swaps the wrapper's
+  // content. A DOM node is appended directly; a non-empty string becomes a text
+  // node; "" / absence renders nothing (the inactive ternary arm).
+  const body = [
+    `${indent}const ${valVar} = (${valueExpr});`,
+    `${indent}${wrapVar}.replaceChildren();`,
+    `${indent}if (${valVar} instanceof Node) ${wrapVar}.appendChild(${valVar});`,
+    `${indent}else if (${valVar} !== null && ${valVar} !== undefined && ${valVar} !== "") ${wrapVar}.appendChild(document.createTextNode(String(${valVar})));`,
+  ];
+  for (const l of maybeWrapEachPerItemEffect(body, iterVarName, indent)) lines.push(l);
+}
+
 function renderTemplateChildToJs(
   child: any,
   iterVarName: string,
@@ -546,8 +697,11 @@ function renderTemplateChildToJs(
         // emit a raw `String(< span > … )` that fails the E-CODEGEN-INVALID-JS
         // gate. Surfaced as a deferred item; NOT a silent correctness change vs.
         // the prior behavior (which also did not render the markup).
+        // g-each-peritem-markup-value-ternary (GITI-032 follow-on) — lower the
+        // markup-as-value (build DOM, resolve `@.` to the item, live-key on
+        // reconcile) instead of skipping. See emitEachPerItemMarkupValue.
         if (exprNodeHasMarkupValue((stmt as any).exprNode)) {
-          lines.push(`${indent}// each: markup-as-value in per-item interpolation not yet lowered (GITI-032 follow-on) — skipped`);
+          emitEachPerItemMarkupValue((stmt as any).exprNode, iterVarName, fragmentVar, lines, indent);
           return;
         }
         // ExprNode-preference contract (mirrors emit-html.ts:1888 + the
@@ -727,7 +881,30 @@ function renderTemplateChildToJs(
     // disposed but goes inert (its mount detached) — no NEW leak class. The
     // `return` in the empty-guard (from emitEachReconcileLines) short-circuits
     // ONLY this effect callback.
+    //
+    // g-nested-each-outer-key-reuse-inner-frozen (S212 Approach-C residual) — the
+    // S212 effect read `innerItemsExpr` (`g.subitems`) off the CREATE-TIME OUTER
+    // closure param, never re-resolved by key. So on a keyed reconcile that REUSES
+    // the outer row node (same outer key) while the outer item's iterated field
+    // changes (array-replace / push into `@.subitems`), the inner each stayed
+    // FROZEN at the create-time outer value. Inject the OUTER-item live-keying
+    // prelude (the SAME shape maybeWrapEachPerItemEffect uses for text/handlers) so
+    // the source read hits the LIVE outer item: `_scrml_resolve_item` tracks the
+    // OUTER mount's item slot, so the outer `_scrml_reconcile_list` re-fires this
+    // inner effect, and the re-resolved `<outerIter>` re-reads the new field value.
+    // The OUTER ctx is captured here (currentEachReconcileCtx() is still the OUTER
+    // each's ctx — emitEachReconcileLines pushes the INNER ctx only inside the loop
+    // below). _scrml_resolve_item already exists in runtime-template.js — no runtime
+    // change. Null/mismatched ctx (defensive) emits the byte-identical S212 shape.
+    const _outerCtx = currentEachReconcileCtx();
     lines.push(`${indent}_scrml_effect(() => {`);
+    if (_outerCtx && _outerCtx.iterVar === iterVarName) {
+      lines.push(`${indent}  let ${_outerCtx.iterVar} = _scrml_resolve_item(${_outerCtx.mountVar}, ${_outerCtx.keyVar});`);
+      lines.push(`${indent}  if (${_outerCtx.iterVar} === null) return;`);
+      for (const l of emitDestructureBindingLines(_outerCtx.destructure, _outerCtx.iterVar, `${indent}  `)) {
+        lines.push(l);
+      }
+    }
     lines.push(`${indent}  const ${innerItemsVar} = ${innerItemsExpr};`);
     for (const l of emitEachReconcileLines(innerNode, innerIterVar, innerIdxName, innerMountVar, innerItemsVar, `${indent}  `, engineCtx)) {
       lines.push(l);
@@ -885,6 +1062,113 @@ function eventNameForAttr(aName: string): string | null {
 }
 
 /**
+ * g-expr-event-handler-dead-in-each (Family-A Half-2, 2026-06-25) — lower a
+ * `${...}` event-handler expression into the INNER listener body statement(s)
+ * that go inside the per-item `function(event) { ... }` wrapper.
+ *
+ * `preLowered` has iter-scope already lowered (`rewriteIterScopeOnly`: `@.field`
+ * -> iterVar.field while `@cell` / `@engineVar` survive). Engine transitions are
+ * intercepted by emitEngineHandlerBody BEFORE this; here we converge the
+ * NON-engine fallback onto the structured emitter (the SAME emitExprField the
+ * canonical top-level `buildHandlerExpr` in emit-variant-guard.ts uses), so:
+ *   - arrow `(...)=>body` / `fn(params){body}`  -> the function IS the handler ->
+ *     INVOKE with the DOM event: `(<fn>)(event);`. (Pre-fix the arrow was emitted
+ *     as a DEAD expression statement -> the click was a silent no-op.)
+ *   - bare ref `${@h}` / `${handler}`           -> invoke `<ref>(event);`.
+ *   - assignment `${@cell = ...}`               -> `_scrml_reactive_set(...)` via
+ *     the structured emitter (pre-fix the string-rewriter lowered the LHS to a
+ *     GETTER -> `E-CODEGEN-INVALID-JS: Assigning to rvalue`).
+ *   - plain expr / call                          -> structured statement.
+ *
+ * Mirrors buildHandlerExpr's shape dispatch but is a deliberately PARALLEL impl:
+ * the iter-scope pre-lowering is each-specific and the each caller supplies its
+ * own `function(event){}` wrapper + Bug-73 live-keying prelude
+ * (maybeWrapEachPerItemHandler), so sharing buildHandlerExpr (which returns the
+ * whole listener function and closes over file-scope engine ctx) would contort
+ * both sites. Function-name mangling (`mark` -> `_scrml_mark_N`) is applied by
+ * the global post-fn-name-mangle pass (emit-client.ts), so call refs emit raw.
+ */
+function buildEachExprHandlerBody(preLowered: string, iterVarName: string): string {
+  const raw = preLowered.trim();
+
+  // fn-shorthand `fn(params) { body }` — parseExprToNode drops the block body
+  // (it returns a bare `call` to `fn`), so detect + extract the param list and
+  // body by hand (the same brace-walk buildHandlerExpr uses), then emit a real
+  // function and invoke it with the event.
+  if (/^fn\s*\(/.test(raw)) {
+    const parenOpen = raw.indexOf("(");
+    let depth = 1;
+    let i = parenOpen + 1;
+    while (i < raw.length && depth > 0) {
+      if (raw[i] === "(") depth++;
+      else if (raw[i] === ")") depth--;
+      if (depth === 0) break;
+      i++;
+    }
+    const parenClose = i;
+    const params = raw.slice(parenOpen + 1, parenClose).trim();
+    const afterParen = raw.slice(parenClose + 1).trimStart();
+    if (afterParen.startsWith("{")) {
+      const braceOpen = parenClose + 1 + (raw.slice(parenClose + 1).length - afterParen.length);
+      let bd = 1;
+      let j = braceOpen + 1;
+      while (j < raw.length && bd > 0) {
+        if (raw[j] === "{") bd++;
+        else if (raw[j] === "}") bd--;
+        if (bd === 0) break;
+        j++;
+      }
+      const body = raw.slice(braceOpen + 1, j).trim();
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { rewriteBlockBody } = require("./emit-control-flow.ts") as {
+        rewriteBlockBody: (b: string, d: unknown, e: EngineRewriteCtx | null) => string;
+      };
+      return `(function(${params}) { ${rewriteBlockBody(body, null, null)}; })(event);`;
+    }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { parseExprToNode } = require("../expression-parser.ts") as {
+    parseExprToNode: (r: string, f: string, o: number) => any;
+  };
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { emitExprField } = require("./emit-expr.ts") as {
+    emitExprField: (n: any, fb: string, c: Record<string, unknown>) => string;
+  };
+
+  let node: any = null;
+  try {
+    node = parseExprToNode(raw, "", 0);
+  } catch {
+    node = null;
+  }
+  if (!node || typeof node !== "object") {
+    // Unparseable — fall back to the legacy iter-scope text rewrite (lowers
+    // `@cell` too) so the handler at least compiles; the structured cases above
+    // cover every shape that previously mis-lowered.
+    return `${rewriteIterValueExpr(preLowered, iterVarName)};`;
+  }
+
+  let lowered: string;
+  try {
+    lowered = emitExprField(node, raw, { mode: "client" });
+  } catch {
+    return `${rewriteIterValueExpr(preLowered, iterVarName)};`;
+  }
+
+  if (node.kind === "lambda") {
+    // The arrow IS the handler — invoke it with the DOM event.
+    return `(${lowered})(event);`;
+  }
+  if (node.kind === "ident") {
+    // Bare handler reference (`${@h}` cell handler / `${localHandler}`).
+    return `${lowered}(event);`;
+  }
+  // Plain expression / call / assignment → structured statement.
+  return `${lowered};`;
+}
+
+/**
  * Lower one per-item element attribute to inline JS on the freshly-created
  * element `elVar`. Handles the four attribute classes that Landing 1 dropped:
  *   1. `class:NAME=expr`  → `elVar.classList.toggle("NAME", !!(expr))`
@@ -980,8 +1264,13 @@ function renderTemplateAttrToJs(
       if (engineLowered !== null) {
         handlerBody = `${engineLowered};`;
       } else {
-        const body = rewriteIterValueExpr(String(val.raw ?? ""), iterVarName);
-        handlerBody = `${body};`;
+        // g-expr-event-handler-dead-in-each (Family-A Half-2) — route the
+        // NON-engine `${...}` handler through the structured emitter so an arrow
+        // / fn-shorthand is INVOKED (was a dead statement), a bare cell ref is
+        // invoked, and an assignment LHS lowers to `_scrml_reactive_set` (was a
+        // getter-on-LHS -> E-CODEGEN-INVALID-JS). Bug-73 live-keying still wraps
+        // this body below so the iter var resolves to the LIVE item at fire-time.
+        handlerBody = buildEachExprHandlerBody(preLowered, iterVarName);
       }
     } else if (valKind === "variable-ref") {
       // `onclick=@handler` — reference a reactive/handler cell. Rewrite then
