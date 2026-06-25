@@ -1,35 +1,28 @@
-# scrml — Session 219 (CLOSE)
+# scrml — Session 220 (OPEN)
 
-**Date:** 2026-06-24→25. **Profile:** A — FULL. A **PA-role-redefinition + design-deliberation** session: the primary-goal directive, 4 DDs/ratifications (6nz AF · the `<endpoint>` primitive · the deputy-elimination), the `<endpoint>` W1 SPEC, the AF lint, and the **vPA deputy ELIMINATED → programmatic flogence digest-boot.**
+**Date:** 2026-06-25. **Profile:** A — FULL. **Boot:** "read pa.md and start session" (explicit first-message → BOOT GATE pass). Prior: S219 CLOSE @ `26ffea4e` (pushed; deputy ELIMINATED, flogence digest-boot wired).
 
-> **Thinned (S205).** Fine-grained stream → `handOffs/delta-log.md` [65]–[74]. This carries the IRREDUCIBLE + open threads.
+## 🚨 BOOT FINDING — flogence digest-boot is BROKEN on first real use (the S219 experiment)
+`bun ../flogence/scripts/digest.ts scrml --fresh` → **`SQLITE_CANTOPEN`**. Root: `digest.ts:19` sets `dbPath = "./flogence.db"` (CWD-relative → resolves against scrml's cwd), but `--fresh`'s bridge (`digest.ts:23`) writes the db with `cwd = flogence/` → the db lives at `flogence/flogence.db`, the digest opens `scrml/flogence.db` → mismatch. **One-line fix (flogence repo):** anchor `dbPath = import.meta.dir + "/../flogence.db"` (NOT cwd-relative), matching where the bridge writes. flogence is a private sibling repo with its OWN PA — surfaced to user; do NOT PA-edit a sibling without direction.
+- **Fallback used (per the experiment's own terms — "digest is an optimization, never a dependency"):** read `hand-off.md` (S219 CLOSE) + the delta-log S219 tail [65]–[74] for volatile state. NOT a full 64k delta-log re-read.
+- **MEASUREMENT (flogence's ask):** the digest realized **0** ctx savings this session (it errored). Once fixed, it would replace the delta-log re-read slice only (~the recent-deltas portion), NOT the irreducible pa.md/PRIMER/SPEC-INDEX/codebase expert load. Report stands: experiment blocked on a path bug, not yet measured.
 
-## 🚨 NEXT-START IS DIFFERENT — read this FIRST
-**The vPA deputy is ELIMINATED** (user measurement: net-negative, no ctx win). **Boot session-start STATE from the PROGRAMMATIC flogence digest, NOT the deputy / delta-log re-read:**
-```
-bun ../flogence/scripts/digest.ts scrml --fresh
-```
-(~1k tokens vs ~64k re-absorbing the delta-log; `--fresh` runs the bridge first.) Then read THIS hand-off for the plan/open-threads. **MEASURE session-start ctx% vs the ~27% baseline + report the breakdown — that's flogence's real test (the experiment).** Full change: pa.md **"S219 addendum — vPA DEPUTY ELIMINATED"** (supersedes S199/S203/S205). No `deputy-maint` (retired). **S205 merge-before-push gate RETIRED** (push = just the S147 0/0 check). Maintenance (maps/§0/changelog/flograph) is **PA-at-wrap** now. `docs/graph` gitignored.
+## ⏸️ OPEN — S220 (priority order, carried from S219)
+0. **ss17 + ss18 IN-FLIGHT (running as separate instances, NO re-integration pings yet).** Worktrees: `scrml-spa-ss17` (spa/ss17 @ `9ee717a4` — booted, scoped 3 each-codegen MED gaps, **dispatched** a combined-fix dev-agent `a70743c2`; 1 scope-commit, behind main 2/ahead 1; clean tree) · `scrml-spa-ss18` (spa/ss18 @ `45182694` — just authored `BRIEF-W2.md` untracked, 0 code commits; the `<endpoint>` W2-W5). **DO NOT touch their worktrees while live.** First action when a ping lands: S67-land + **reconcile BY HAND** (ss17 touches `emit-html.ts`/each-codegen; ss18 touches `SPEC.md` §34/§61 + parser/typer/codegen) — NOT blind file-delta (parallel-collision rule; also vs just-landed AF-lint §34 row + §61).
+1. **`<endpoint>` build** — W1 SPEC §61 LANDED (`a78ea133`, Nominal). ss18 IS W2-W5. On W4/W5 land: flip §61 Nominal banner + run flogence `fsp-wire-smoke` conformance. Deferred `raw` server-fn gated on a witnessed untypeable case.
+2. **AF complete** ✅ (lint `W-INPUT-STATE-MARKUP-NONREACTIVE` landed `45182694`). Deferred: attribute-position interps + indirect reads (file LOW if friction); D @cell-bridge sugar deferred-until-witnessed.
+3. **handle() re-examination** — banked dpa-012 (global-middleware raw escape's fit with the new `<endpoint>`/`raw` surfaces). Fire when `<endpoint>` settles.
+4. **Drive the rest of the board** (primary-goal): MED ~15 / LOW ~15 + the **Nominal features** (8-9 spec-ahead: Build-Story §58 · import:host §21.3.1 · quoted-text §4.18-fire · WASM-sigils · sidecar-processes · gating-runtime §40.9.5 · engine-opener-effect §51.0.H). Recent deferred MED gaps to slot: g-each-peritem-markup-value-ternary (ss17) · g-nested-interp-in-markup-value-literal · g-named-machine-arrow-no-statedecl-silent-empty · g-colon-shorthand-markup-misparse · g-inlined-component-root-class-interp-raw · g-each-inline-component-prop-member-unsubstituted (HIGH? — verify) · nested-`<each>`-outer-reuse (Bug-72).
+5. **dpa follow-ons** (banked): dpa-006/007/008/009/010/011/012 + `_{}` standalone/library-mode-db (OQ-F1).
 
-## ⏸️ OPEN — S220 (priority order)
-0. **ss17 + ss18 ARE IN-FLIGHT** (user fired them S219; running on `scrml-spa-ss17` + `scrml-spa-ss18` worktrees + a dev-agent worktree). **First action: check `handOffs/incoming/` for their re-integration pings + S67-land them.** ⚠ **Reconcile by hand (parallel-collision rule):** ss17 touches `emit-html.ts`; ss18 touches `SPEC.md` §34 (the E-ENDPOINT-* rows) — both vs main + vs each other + vs the just-landed AF-lint SPEC §34 row + §61. NOT blind file-delta. ss17 = 3 MED emit-each (g-each-peritem-markup-value-ternary · g-nested-each-outer-key-reuse-inner-frozen · g-expr-event-handler-dead-in-each=Family-A-Half-2). ss18 = `<endpoint>` W2-W5 (parser→typer→codegen→tests; each wave's §34 rows land with it per Rule 4).
-1. **`<endpoint>` build** — W1 SPEC §61 LANDED (`a78ea133`, Nominal). ss18 IS W2-W5. SCOPE: `docs/changes/endpoint-primitive-2026-06-25/`. On W4/W5 landing flip the §61 Nominal banner + run the flogence `fsp-wire-smoke` conformance. The deferred `raw` server-fn (a) stays gated on a witnessed untypeable case.
-2. **AF complete** ✅ (lint landed `45182694`). Deferred (noted in the lint header): attribute-position interps (`style="…${<#cursor>.x}…"`) + indirect reads (`${fmt()}` reading `<#id>`) — conservative-scan out-of-scope; file as a LOW if friction. D-sugar (the @cell-bridge stdlib helper) deferred-until-witnessed.
-3. **handle() re-examination** — banked dpa-012 (re-examine the global-middleware raw escape's fit with the new `<endpoint>`/`raw` surfaces). Fire when the `<endpoint>` build settles.
-4. **The rest of the board** (drive it per the primary-goal directive): MED/LOW backlog (~15/15) + the **Nominal features** (8-9 spec-ahead, never built — Build-Story §58 / import:host §21.3.1 / quoted-text §4.18-fire / WASM-sigils / sidecar-processes / gating-runtime §40.9.5 / engine-opener-effect §51.0.H). The board-refresh (S219, in the delta-log) has the slotting. **Maps OWED** (PA-at-wrap now; deferred this transition wrap — run `project-mapper` next session).
-5. **dpa follow-ons** (banked candidates): dpa-006/007/008/009/010/011 + the `_{}` standalone/library-mode-db (OQ-F1).
+## 🔧 MAPS OWED (PA-at-wrap now — deputy gone)
+Maps were 12-behind at S218, deferred through the S219 deputy-elimination transition. **Run `project-mapper` incremental this session** (watermark trails HEAD; the S219 surface = §61 SPEC + AF-lint + `_{}` + GITI-032 + 6nz-B fixes). Commit with explicit pathspec (non-isolated agent shares main index).
 
-## 🎯 Design narrative (IRREDUCIBLE — the design layer can't synthesize this)
-- **The PA primary-goal directive ([69]):** finish-the-project-in-a-session; orchestrate-don't-grind; default-GO; only-a-blocking-Q-pauses; recovery is the 4th irreducible. THE operating contract now (pa.md S219 addendum + memory).
-- **6nz AF ([70]):** the god-ification fear was ANSWERED on the side of the limit — render-once is the universal cross-framework norm (everyone bridges raw input through state). Lint ships, D deferred.
-- **`<endpoint>` ([72]):** the user reframed the DD's a-vs-b SHAPE fork into an a+b PAIR (typed `<endpoint>` default + `raw` escape) — and that resolved the blessing-invites-scope-creep reservation (`<endpoint>` is the blessed default; `raw` is the marked escape). Build `<endpoint>` first (flogence's FSP need is typed); `raw` deferred. The DD's key insight: the INBOUND-edge decode is a boundary scrml OWNS → un-handled variant = compile error (the honesty that makes it a sharp primitive, not god-ification).
-- **The deputy-elimination ([74]):** the deputy's FUNCTION was sound, the AGENT mechanism net-negative; flogence does the absorb programmatically for free. Maintenance reverts to PA.
-
-## Board @ close
-**HIGH 0 · MED ~15 · LOW ~15 · Nom 8-9** · v0.7.0. Suite **25073/0/213** (AF-lint). **Pushed:** scrml `45182694`-era (the boot residue, B2 fix, 6nz, AF-lint, §61, deputy-merge) + scrml-support (directive + 2 DDs). **THIS WRAP unpushed:** the pa.md deputy-elimination addendum + .gitignore + delta-log + §0 + this hand-off + changelog + ss18 mint + the AF-lint commit (`45182694`, 1 ahead pre-wrap). Push at wrap-end.
+## Board @ S219 close (current truth)
+**HIGH 0 · MED ~15 · LOW ~15 · Nom 8-9** · v0.7.0. Suite **25073/0/213**. scrml + scrml-support both **0/0 with origin** (S219 pushed clean). No `deputy-maint` branch (retired). 4 retained worktrees: 2 sPA (ss17/ss18, LIVE — keep) + 2 locked dev-agent worktrees under `.claude/worktrees/` (likely ss17's dispatched `a70743c2` + a stale one — triage when ss17 lands, do NOT sweep live ones).
 
 ## pa.md directives in force
-R1–R5 · `---` · Profile A · **S219 PRIMARY-GOAL (finish-the-project / orchestrate / default-GO / blocking-Q-only-pause)** · **S219 DEPUTY-ELIMINATED → flogence digest-boot (measure ctx%)** · S88/S99/S126 path-discipline · S136 BRIEF · S138 R26 · S147 coherence (S205 merge-before-push RETIRED) · S215 adversarial-verify · S217 per-user profile · wrap 8-step (now full PA-maintenance, no deputy-shrink).
+R1–R5 · `---` delimiter · Profile A · **S219 PRIMARY-GOAL** (finish-the-project / orchestrate-don't-grind / default-GO / blocking-Q-only-pause / recovery=4th-irreducible) · **S219 DEPUTY-ELIMINATED → flogence digest-boot** (broken, see above; maintenance = PA-at-wrap; S205 merge-before-push gate RETIRED — push = plain S147 0/0 check) · S88/S99/S126 path-discipline · S136 BRIEF archival · S138 R26 · S147 coherence · S215 adversarial-verify + random-sample-10× · S217 per-user profile (bryan) · wrap 8-step (full PA-maintenance, no deputy-shrink).
 
 ## Tags
-#session-219 #close #pa-primary-goal-directive #af-ratified-lint-landed #endpoint-primitive-ratified-w1 #deputy-eliminated #flogence-digest-boot #ss17-ss18-in-flight
+#session-220 #open #boot #flogence-digest-broken #ss17-ss18-in-flight #endpoint-w2-w5 #maps-owed #pa-primary-goal

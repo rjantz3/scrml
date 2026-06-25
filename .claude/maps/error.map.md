@@ -1,6 +1,6 @@
 # error.map.md
 # project: scrmlts
-# updated: 2026-06-24  commit: 162564f3
+# updated: 2026-06-25  commit: 26ffea4e
 
 scrml's own language error model is values-not-exceptions (SPEC §19.1 — no try/catch, no throw).
 The compiler itself surfaces structured CGError objects to the caller; it never throws on bad input.
@@ -236,7 +236,7 @@ ss14/ss15 ZERO new diagnostic codes:
 
 | Code | Severity | §34 section | Fire site |
 |------|----------|------------|-----------|
-| W-INTERP-IN-RAW-CONTENT | Info | §4.17 | lint-w-interp-in-raw-content.js:runWInterpInRawContent; wired api.js Stage 2.5 |
+| W-INTERP-IN-RAW-CONTENT | **Warning** (promoted from Info — 6nz B1, 2026-06-24) | §4.17 | lint-w-interp-in-raw-content.js:runWInterpInRawContent; wired api.js Stage 2.5 |
 
 Info → result.warnings (non-fatal). New module: compiler/src/lint-w-interp-in-raw-content.js (207L).
 
@@ -913,6 +913,33 @@ g-pure-module-server-emit HIGH from known-gaps (section-0 HIGH 1->0).
 - Severity `info` -> `result.warnings` (non-fatal). The missing import may or may
   not be exercised at runtime depending on code paths; the compile-level fix requires
   resolving the underlying route-mis-inference gap.
+
+
+## S219 New Codes — 6nz B1/B2 + W-INPUT-STATE-MARKUP-NONREACTIVE (commit `45182694` / `d71a6dcc`)
+
+### 6nz B1 — W-INTERP-IN-RAW-CONTENT promoted Info → Warning
+
+Severity promotion only (no new code). A dropped interpolation inside `<pre>`/`<code>` is a silent rendering break. `result.warnings` partition unchanged (non-fatal; CLI exit 0). SPEC §34 row updated "Promoted info→warning 6nz B1."
+
+### 6nz B2 — E-ENGINE-RULE-LEGACY-SYNTAX whole-body fire site (NEW fire site on existing code)
+
+| Code | Severity | §34 section | Fire site |
+|------|----------|------------|-----------|
+| E-ENGINE-RULE-LEGACY-SYNTAX (whole-body arrow form) | Error | §51.0.F / §51.3 | symbol-table.ts `validateEngineStateChildrenAndRules` B15 gate — new `!isLegacyMachineKeyword && !isNamedMachine && !isDerivedEngine` scope guard |
+
+Code was pre-existing in the §34 catalog (added S68 A1b B15 for the `rule=` attribute legacy form). The **whole-body** fire site is NEW (2026-06-24). A `<engine for=T>` without `name=` that carries a whole-body machine-style arrow-rule grammar (`.From => .To`) previously compiled silently to a `__scrml_transitions` table WITHOUT the §51.0.C cell auto-declaration/init, leaving the governed `@var` `undefined` at mount with zero diagnostic. EXEMPTIONS: `legacyMachineKeyword === true` (deprecated `<machine>`) / `hadNameAttr === true` (named §51.3.2 form) / `isDerivedEngine` (§51.0.J/§51.9 projection body).
+
+### S219 — NEW W-INPUT-STATE-MARKUP-NONREACTIVE (6nz AF, ratified S210 + S219)
+
+| Code | Severity | §34 section | Fire site |
+|------|----------|------------|-----------|
+| W-INPUT-STATE-MARKUP-NONREACTIVE | Info | §36.6 | lint-w-input-state-markup-nonreactive.js:runWInputStateMarkupNonreactive; wired api.js Stage 2.5b |
+
+Info → result.warnings (non-fatal; CLI exit 0). NEW module: compiler/src/lint-w-input-state-markup-nonreactive.js (292L). Post-BS pass, alongside the sibling `runWInterpInRawContent`. An input-state `<#id>.field` read (`<keyboard>`/`<mouse>`/`<gamepad>`, §36) inside a markup interpolation renders ONCE at mount with NO reactive subscription — that is CORRECT per §36.6 but was silent. The lint makes the footgun loud and steers to the `@cell` bridge. Conservative: fires only when the ref id matches a DECLARED input-state element (not the §6.7.7 `<request>` render bridge) and NOT inside an `animationFrame` loop.
+
+### §61 `<endpoint>` — Planned codes (Nominal, ZERO current implementation)
+
+Reserved codes (§34 rows land WITH impl per Rule 4, like §60 E-API-*): `E-ENDPOINT-NOT-EXHAUSTIVE` / `E-ENDPOINT-ACCEPTS-NOT-ENUM` / `E-ENDPOINT-PATH-MISSING` / `E-ENDPOINT-METHOD-INVALID` / `E-ENDPOINT-ACCEPTS-MISSING`. NO fire sites exist as of S219 — W2 parser wave wires the first codes.
 
 
 ## Error Handling Patterns

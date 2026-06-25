@@ -1,6 +1,6 @@
 # schema.map.md
 # project: scrmlts
-# updated: 2026-06-24  commit: 162564f3
+# updated: 2026-06-25  commit: 26ffea4e
 
 Authoritative AST type source: `compiler/src/types/ast.ts` (~2054L, TypeScript).
 IR types: `compiler/src/codegen/ir.ts` (253 lines).
@@ -93,6 +93,7 @@ kind: "component-def"; name: string; props: TypedAttrDecl[]; body: ASTNode[]
 kind: "engine-decl"; name: string; stateChildren: ASTNode[]; initial?: string; derived?: ExprNode; ... +8 more fields
 **S154 addition:** `acceptsType?: string | null` — raw enum-type identifier from `accepts=MsgType` engine-opener attribute (§51.0.S.2.2); recorded verbatim by parser (batch 1); resolved by SYM PASS 11 typer (batch 2); non-resolution fires `E-ENGINE-ACCEPTS-NOT-ENUM`.
 **S172 addition:** `inlineMatchArmArrows?: { glyph, srcOffset }[]` — per-arm separator-glyph stamp for the `derived=match` raw-text body (no structured arm nodes); consumed by W-MATCH-ARROW-LEGACY + `migrate --fix`.
+**S219 addition:** `hadNameAttr?: boolean` — TRUE iff an explicit `name=` attribute was present on the opener (the §51.3.2 named-machine form `<engine name=X for=T>`, which admits a whole-body arrow grammar); FALSE for the §51.0.C state-engine form `<engine for=T initial=...>`. Read by SYM PASS 11/B15 to scope the E-ENGINE-RULE-LEGACY-SYNTAX whole-body fire site to the no-`name=` state-engine form only. Parallel parity stamp in native-parser/collect-hoisted.js. (6nz B2, 2026-06-24.)
 
 ### TypeDeclNode extends BaseNode
 kind: "type-decl"; name: string; typeKind: "struct"|"enum"|"alias"; body: string

@@ -1,6 +1,6 @@
 # domain.map.md
 # project: scrmlts
-# updated: 2026-06-24  commit: 162564f3
+# updated: 2026-06-25  commit: 26ffea4e
 
 The domain is the scrml COMPILER pipeline. scrml is a single-file, full-stack reactive web
 language compiled by this TypeScript/JS toolchain running on Bun. The compiler converts `.scrml`
@@ -399,6 +399,20 @@ Five compiler-internal fixes across route-inference, ast-builder, emit-each, emi
 | 6nz Bug AI — each/empty reconcile `replaceChildren` fix (S218) | `_scrml_reconcile_list` in runtime-template.js: on the empty→non-empty edge (`oldNodes.size === 0`), the container's empty-branch placeholder was NOT torn down before the new keyed items were appended. The empty branch's `replaceChildren()` call (which clears the container) ran in the empty-branch codepath but the reconcile path at `oldNodes.size === 0` (the FIRST reconcile on a previously-empty container) skipped it. Fix at runtime-template.js ~:1621: added `container.replaceChildren()` at the entry of the `oldNodes.size === 0` non-empty path — clears any empty-branch DOM residue before appending new keyed items. Mirrors the existing `oldNodes.size > 0` path which owns its own teardown. |
 
 **domain.map watermark advanced `062165a5`→`162564f3`.**
+
+
+
+## S219 New Domain Concepts — 6nz B2 + W-INPUT-STATE-MARKUP-NONREACTIVE + §61 (since watermark 162564f3 → 26ffea4e)
+
+**S219 source changes (`26ffea4e` — 2026-06-25; 6nz B2 E-ENGINE-RULE-LEGACY-SYNTAX whole-body fire + 6nz B1 W-INTERP-IN-RAW-CONTENT info→warning promotion + NEW W-INPUT-STATE-MARKUP-NONREACTIVE post-BS lint + §61 `<endpoint>` Nominal spec section; ZERO new FileAST node types; `hadNameAttr` is a new field on existing EngineDeclNode):**
+
+| Concept | Definition |
+|---------|-----------|
+| 6nz B2 — `<engine for=T>` whole-body arrow-rule reject (S219) | A `<engine for=T initial=...>` opener (§51.0.C state-engine form, no `name=` attribute) carrying a whole-body machine-style arrow-rule body (`.From => .To`) previously compiled SILENTLY to a `__scrml_transitions` table WITHOUT the §51.0.C cell auto-declaration/init — the governed `@cell` was `undefined` at mount and any `<match on=@cell>` rendered EMPTY. Fix: ast-builder.js stamps `hadNameAttr: nameMatch !== null` on the engine-decl node; symbol-table.ts SYM PASS 11/B15 fires `E-ENGINE-RULE-LEGACY-SYNTAX` (Error, pre-existing code) when `!legacyMachineKeyword && !hadNameAttr && !isDerived`. EXEMPTIONS: `<machine>` keyword (deprecated but supported §51.3 surface, already fires W-DEPRECATED-001) / named §51.3.2 form `<engine name=X for=T>` (legitimately admits arrow bodies) / derived engines §51.0.J/§51.9 (projection bodies). native-parser/collect-hoisted.js patched to produce the same `hadNameAttr` field on `synthEngineDecl`. |
+| W-INPUT-STATE-MARKUP-NONREACTIVE — input-state in markup interp (S219) | NEW post-BS lint (292L, `lint-w-input-state-markup-nonreactive.js`). Surfaces input-state `<#id>.field` reads (`<keyboard>` / `<mouse>` / `<gamepad>`, §36.1) placed inside markup interpolations (`${ … }` in a markup body or value position). Per §36.6 input-state is a LIVE-READ source, NOT a reactive cell: the interpolation renders ONCE at mount with NO re-render on input change. That is CORRECT and by-design (input drives game logic at `animationFrame`, not reactive UI); the defect closed is the SILENCE. Resolution in diagnostic: `@cell` bridge (read `<#id>` inside an `animationFrame` loop, assign to an `@cell`, then interpolate the reactive `@cell`). Conservative: fires ONLY when the ref id matches a DECLARED input-state element (never the §6.7.7 `<request>` render bridge) and NOT inside an `animationFrame` loop. Wired at api.js Stage 2.5b alongside sibling `runWInterpInRawContent`. Partitions into `result.warnings` (non-fatal). Code: `W-INPUT-STATE-MARKUP-NONREACTIVE`, Info, §36.6. |
+| §61 typed-inbound-endpoint `<endpoint>` (S219 Nominal/spec-ahead) | NEW SPEC section §61, 157L. The typed INBOUND edge — the serve-side mirror of §60 `<api>` (typed outbound ⇄ typed inbound): a foreign client calls a scrml-served route; the compiler owns the decode + exhaustive dispatch + the JSON envelope; the author fills per-variant arms (REUSE §18.0.1 arm + §51.0.B.1 payload binding). Grammar: `<endpoint path= method= accepts=:enum>`. Decode: `parseVariant` §41.13 over the body. Exhaustiveness: `E-ENDPOINT-NOT-EXHAUSTIVE` (a new `accepts=` variant without an arm = compile error — the inbound-honesty guarantee). JSON-RPC is a convention (enum+result) NOT a baked-in mode. Client-codegen SKIP: server handler only — foreign client has its own SDK. auth: JSON+bearer CSRF-exempt by construction. Relationship: §60 `<api>` outbound ⇄ §61 inbound · §37 SSE leg LANDED · §40 `handle()` global raw escape stays · DEFERRED path-bound `raw` server-fn. Nominal/spec-ahead as of S219 — W2 parser / W3 typer / W4 codegen / W5 tests follow. Authority: dpa-002 reopen + S219 ratification. |
+
+**domain.map watermark advanced `162564f3`→`26ffea4e`.**
 
 
 ## Tags
