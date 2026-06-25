@@ -56,7 +56,8 @@ describe("runWInterpInRawContent — direct", () => {
     const diags = runWInterpInRawContent([bsResultWith("pre", "${board}")]);
     expect(diags.length).toBe(1);
     expect(diags[0].code).toBe("W-INTERP-IN-RAW-CONTENT");
-    expect(diags[0].severity).toBe("info");
+    // 6nz B1 (2026-06-24) — promoted info -> warning (silent rendering break).
+    expect(diags[0].severity).toBe("warning");
     expect(diags[0].message).toContain("${...}");
     expect(diags[0].message).toContain("<pre>");
     expect(diags[0].message).toContain("whitespace-pre");
@@ -170,13 +171,15 @@ describe("W-INTERP-IN-RAW-CONTENT — end-to-end partition", () => {
     // Cross-stream: in warnings, NEVER in errors (S93/diagnostic-partition rule).
     expect(warnHits(res).length).toBe(1);
     expect(errHits(res).length).toBe(0);
-    expect(fatalErrors(res).length).toBe(0); // info-level keeps CLI exit 0
+    expect(warnHits(res)[0].severity).toBe("warning"); // 6nz B1: promoted to warning
+    expect(fatalErrors(res).length).toBe(0); // warning-level keeps CLI exit 0
   });
 
   test("`<code>${x}</code>` fires exactly one W-INTERP in result.warnings (exit 0)", () => {
     const res = compile("<program><code>${x}</code></program>");
     expect(warnHits(res).length).toBe(1);
     expect(errHits(res).length).toBe(0);
+    expect(warnHits(res)[0].severity).toBe("warning");
     expect(fatalErrors(res).length).toBe(0);
   });
 
@@ -193,7 +196,7 @@ describe("W-INTERP-IN-RAW-CONTENT — end-to-end partition", () => {
     expect(errHits(res).length).toBe(0);
   });
 
-  test("a `?{` brace sigil inside <pre> surfaces the info lint (never an error)", () => {
+  test("a `?{` brace sigil inside <pre> surfaces the warning lint (never an error)", () => {
     const res = compile("<program><pre>The ?{ opener}</pre></program>");
     expect(warnHits(res).length).toBe(1);
     expect(errHits(res).length).toBe(0);

@@ -455,6 +455,12 @@ export function synthEngineDecl(block, stamp, source) {
         // StateOpener by the native opener scanner; `<engine` is ScrmlStructural.
         openerHadSpaceAfterLt: block.tagKind === "StateOpener",
         legacyMachineKeyword: block.name === "machine",
+        // 6nz B2 (2026-06-24) — parity with ast-builder.js: TRUE iff an explicit
+        // `name=` attribute was present (the §51.3.2 named-machine form, which
+        // admits a whole-body arrow grammar). FALSE for the §51.0.C state-engine
+        // form; SYM PASS 11/B15 reads this to scope E-ENGINE-RULE-LEGACY-SYNTAX
+        // (whole-body arrow fire-site) to the no-`name=` state-engine form only.
+        hadNameAttr: legacyName !== null,
         span: block.span,
         // M6.6.b.2 — native-walker bridge. Stamp the source native engine
         // Markup block + the full file source so symbol-table's PASS 11

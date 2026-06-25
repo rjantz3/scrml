@@ -979,6 +979,14 @@ export interface EngineDeclNode extends BaseNode {
   openerHadSpaceAfterLt: boolean;
   /** True iff this engine-decl was authored with the legacy `<machine>` keyword. */
   legacyMachineKeyword: boolean;
+  /**
+   * True iff an explicit `name=` attribute was present on the opener — the
+   * §51.3.2 NAMED-machine form (`<engine name=X for=T>` / `<machine name=X
+   * for=T>`), which admits a whole-body arrow-rule grammar. False for the
+   * §51.0.C state-engine form (`<engine for=T initial=...>`), whose body must
+   * use state-child `rule=` openers (6nz B2, 2026-06-24).
+   */
+  hadNameAttr?: boolean;
 }
 
 // -- Control Flow --

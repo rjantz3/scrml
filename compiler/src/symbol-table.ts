@@ -6667,6 +6667,56 @@ export function validateEngineStateChildrenAndRules(
         )
       : isLegacyArrowRulesBody(rulesRaw);
   if (stateChildren.length === 0 && isLegacyArrow) {
+    // 6nz B2 (2026-06-24) — the §51.0.C STATE-engine form (`<engine for=T
+    // initial=...>`, no `name=`) MUST NOT carry a whole-body arrow-rule grammar
+    // (`.From => .To`). Such a body has no PascalCase state-child opener, so the
+    // type-system registers it as a legacy MachineType (parseMachineRules) and
+    // routes to emit-machines.ts — which emits the `__scrml_transitions_<var>`
+    // table but NEVER the §51.0.C cell auto-declaration/init. The governed cell
+    // stays `undefined` at mount and any driven `<match on=@var>` renders EMPTY,
+    // with ZERO diagnostic. Fire E-ENGINE-RULE-LEGACY-SYNTAX (Error) so the
+    // adopter is steered to the canonical state-child `rule=` form instead of
+    // silently shipping a blank page.
+    //
+    // Scope precisely. The fire is EXCLUSIVELY for the `<engine>`-keyword
+    // state-engine form:
+    //   - `legacyMachineKeyword === true` (`<machine>` keyword) is EXEMPT — the
+    //     deprecated-but-supported §51.3 machine surface legitimately uses arrow
+    //     bodies and already fires W-DEPRECATED-001 at the keyword.
+    //   - `hadNameAttr === true` (the §51.3.2 NAMED-machine form `<engine
+    //     name=X for=T>`) is EXEMPT — SPEC §51.3.2 admits a whole-body arrow
+    //     grammar there; the machine is bound to a variable via `@var: Name`.
+    //   - a DERIVED engine (§51.0.J / §51.9, `meta.derivedExpr` set, or a
+    //     `sourceVar` / `inlineMatchBody` / `derivedExprNode` present) is EXEMPT
+    //     — its projection body legitimately uses `.Source => .Projection` arrow
+    //     rules; B16 owns its diagnostics.
+    const isLegacyMachineKeyword = engineDecl.legacyMachineKeyword === true;
+    const isNamedMachine = engineDecl.hadNameAttr === true;
+    const isDerivedEngine =
+      isDerived ||
+      engineDecl.sourceVar != null ||
+      (typeof engineDecl.inlineMatchBody === "string" && engineDecl.inlineMatchBody.length > 0) ||
+      engineDecl.derivedExprNode != null;
+    if (!isLegacyMachineKeyword && !isNamedMachine && !isDerivedEngine) {
+      const forClause = forType.length > 0 ? `for=${forType}` : "for=…";
+      fireB15Diagnostic(
+        errors,
+        "E-ENGINE-RULE-LEGACY-SYNTAX",
+        `E-ENGINE-RULE-LEGACY-SYNTAX: \`<engine ${forClause}>\` uses the legacy ` +
+        `whole-body event-arrow rule form (\`.From => .To\`). On the \`<engine>\` ` +
+        `keyword, transitions are declared per-state via the state-child \`rule=\` ` +
+        `contract (§51.0.F), not a machine-style arrow body. Rewrite each variant as a ` +
+        `state-child with its outgoing \`rule=\`: one of the three §51.0.F target-only ` +
+        `forms — single-target (\`<Variant rule=.NextVariant/>\`), multi-target ` +
+        `(\`<Variant rule=(.A | .B)/>\`), or wildcard (\`<Variant rule=*/>\`). ` +
+        `Whole-body arrow rules belong to the named/legacy \`<machine>\` surface ` +
+        `(§51.3) — declare \`<engine name=Name ${forClause}>\` (or the deprecated ` +
+        `\`<machine>\`) and bind a variable to it if you intend a machine.`,
+        engineDecl,
+        filePath,
+        "error",
+      );
+    }
     return;
   }
 

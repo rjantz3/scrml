@@ -495,22 +495,30 @@ describe("B15 PASS 11 — derived-engine boundary", () => {
 });
 
 // ---------------------------------------------------------------------------
-// PASS 11 — legacy machine arrow body skip
+// PASS 11 — legacy machine arrow body on the <engine> keyword (6nz B2 reject)
 // ---------------------------------------------------------------------------
 
-describe("B15 PASS 11 — legacy arrow-rule bodies", () => {
-  test("legacy `.Small => .Big` body skips state-child diagnostics", () => {
+describe("B15 PASS 11 — legacy arrow-rule bodies on the <engine> keyword", () => {
+  test("legacy `.Small => .Big` whole-body on the <engine> keyword REJECTS via E-ENGINE-RULE-LEGACY-SYNTAX", () => {
+    // 6nz B2 (2026-06-24) — the §51.0.C state-engine form (`<engine for=T
+    // initial=...>`, no `name=`) does NOT admit a whole-body arrow grammar.
+    // Pre-fix this silently half-compiled (transitions table, no §51.0.C cell
+    // init) with ZERO diagnostic; now it fires E-ENGINE-RULE-LEGACY-SYNTAX. The
+    // state-child exhaustiveness codes still do NOT fire (we early-return before
+    // those checks — no state-children were parsed from the arrow body).
     const src = `\${ type MarioState:enum = { Small, Big } }
 <engine for=MarioState initial=.Small>
   .Small => .Big
   .Big => .Small
 </>`;
     const { sym } = runUpToSYM(src);
-    // Legacy body — no state-child parsing → no exhaustiveness checks.
     expect(errorsByCode(sym, "E-ENGINE-STATE-CHILD-MISSING").length).toBe(0);
     expect(errorsByCode(sym, "E-ENGINE-STATE-CHILD-INVALID-VARIANT").length).toBe(0);
     expect(errorsByCode(sym, "E-ENGINE-RULE-INVALID-VARIANT").length).toBe(0);
-    expect(errorsByCode(sym, "E-ENGINE-RULE-LEGACY-SYNTAX").length).toBe(0);
+    // The whole-body arrow form is now an Error on the <engine> keyword.
+    const legacy = errorsByCode(sym, "E-ENGINE-RULE-LEGACY-SYNTAX");
+    expect(legacy.length).toBe(1);
+    expect(legacy[0].severity).toBe("error");
   });
 
   test("legacy body still validates initial= (independent of body form)", () => {

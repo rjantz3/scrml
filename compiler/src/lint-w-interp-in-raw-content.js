@@ -1,5 +1,5 @@
 /**
- * W-INTERP-IN-RAW-CONTENT — info-level lint that surfaces scrml-significant
+ * W-INTERP-IN-RAW-CONTENT — warning-level lint that surfaces scrml-significant
  * tokens that appear LITERALLY (and silently) inside the body of a raw-content
  * element (`<pre>` / `<code>`, SPEC §4.17).
  *
@@ -22,7 +22,7 @@
  * block-splitter as a single `{ type: "text", raw }` child of the
  * `{ type: "markup", name }` raw-content node (lowercase-first HTML name), so the walk
  * scans that captured string directly. Diagnostics flow through `collectErrors`
- * into `allErrors`, where the `W-` prefix + `severity:"info"` partition them into
+ * into `allErrors`, where the `W-` prefix + `severity:"warning"` partition them into
  * `result.warnings` (non-fatal; CLI exit stays 0) — never `result.errors`.
  *
  * **Detection (conservative — false positives are worse than misses).** A
@@ -108,7 +108,8 @@ function buildMessage(elementName, tokenLabel) {
     `pre-formatted whitespace while keeping \`\${...}\` live). To show the token ` +
     `verbatim as intended, escape its leading character (HTML entity for \`<\`, ` +
     `or a literal note that the raw body passes \`\${...}\` through unchanged). ` +
-    `Informational only — the raw body continues to compile.`
+    `Warning-level (6nz B1) — non-fatal; the raw body continues to compile, but ` +
+    `the token ships verbatim, so this is a silent rendering break if you intended interpolation.`
   );
 }
 
@@ -196,7 +197,12 @@ export function runWInterpInRawContent(bsResults) {
         line: span.line ?? 0,
         column: span.col ?? 0,
         code: "W-INTERP-IN-RAW-CONTENT",
-        severity: "info",
+        // 6nz B1 (2026-06-24) — promoted info -> warning. The dropped `${...}`
+        // is a SILENT rendering break (the literal source text ships to the
+        // page; nothing is evaluated). The `W-` prefix + severity:"warning"
+        // still partition into result.warnings (non-fatal; CLI exit unchanged) —
+        // it just surfaces louder than an info-level note.
+        severity: "warning",
         message: buildMessage(elementName, tokenLabel),
         span,
       });

@@ -15416,6 +15416,15 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           isExported: block._b14IsExport === true,
           openerHadSpaceAfterLt: block.openerHadSpaceAfterLt === true,
           legacyMachineKeyword: isLegacyMachineKeyword,
+          // 6nz B2 (2026-06-24) — explicit `name=` presence on the engine/machine
+          // opener. TRUE for the §51.3.2 NAMED-machine form (`<engine name=X for=T>`
+          // / `<machine name=X for=T>`), which legitimately admits a whole-body
+          // arrow-rule grammar (`.From => .To`). FALSE for the §51.0.C state-engine
+          // form (`<engine for=T initial=...>` — no `name=`), whose body MUST use
+          // state-child `rule=` openers; a whole-body arrow there is E-ENGINE-RULE-
+          // LEGACY-SYNTAX (SYM PASS 11/B15). `engineName` alone cannot discriminate
+          // because the state-engine form back-fills an auto-derived engineName.
+          hadNameAttr: nameMatch !== null,
           span,
         };
       }

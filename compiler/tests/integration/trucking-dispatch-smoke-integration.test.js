@@ -346,15 +346,16 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
     // Aggregate 73 -> 74.
     "W-ENGINE-SERVER-SOURCE-NOT-AUTHORITATIVE": 1,
     // g-interp-in-raw-content (ss11 item 1, SPEC §4.17): the new
-    // W-INTERP-IN-RAW-CONTENT info-lint fires on the three `${...}` interpolations
+    // W-INTERP-IN-RAW-CONTENT warning-lint fires on the three `${...}` interpolations
     // authored inside `<code>` raw-content bodies — these ship the LITERAL
     // `${...}` text to the page (the §4.17 raw-pass-through), so the lint nudges
     // toward a non-raw wrapper. Real sites:
     //   - pages/customer/profile.scrml L115  `<code ...>${@currentUser.email}</code>`
     //   - pages/driver/messages.scrml  L231  `<code ...>${@channelId}</code>`
     //   - pages/driver/profile.scrml   L175  `<code ...>${@currentUser.email}</code>`
-    // (line refs post item-7 unwrap, -2 each.) Info-level (severity:info, W- prefix)
-    // — partitions into result.warnings, exit stays 0. Aggregate 74 -> 77 (item 1).
+    // (line refs post item-7 unwrap, -2 each.) Warning-level (severity:warning, W- prefix,
+    // promoted from info 6nz B1 2026-06-24) — partitions into result.warnings, exit stays 0.
+    // Aggregate 74 -> 77 (item 1).
     "W-INTERP-IN-RAW-CONTENT": 3,
     "W-PROGRAM-001": 4,
     // phase-b1-examples-rewrite (ss11 item 7, canonical-form pass): each trucking
