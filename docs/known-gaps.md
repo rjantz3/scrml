@@ -16,7 +16,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 6 |
-| MED | 21 |
+| MED | 22 |
 | LOW | 15 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -2514,3 +2514,6 @@ The class extractor only emits rules for classes seen at top level. A class appe
 
 ### G-EMIT-LIFT-MARKUP-TEXT-INTERP-NOT-LOWERED — emit-lift `emitCreateElementFromMarkup` renders a markup TEXT child's `${...}` LITERALLY for non-each callers (match/engine arm markup-value) — `NEW S220 (ss17 item-2 agent-surfaced); MED; shared root of g-nested-interp-in-markup-value-literal`
 ss17 item-2 fixed the `<each>` per-item markup-value path by splitting markup-text into interp children before `emitMarkupValueExpr`, but the SHARED `emit-lift` gap remains: a markup TEXT child's `${...}` interpolation is still rendered literally by `emitCreateElementFromMarkup` for every OTHER caller — the `<match>`/`<engine>` arm markup-value path (S201 top-level + arm). Root: `emit-lift` doesn't lower `${...}` inside markup TEXT children to a reactive interpolation. **Shared root of `g-nested-interp-in-markup-value-literal` (LOW)** — fixing emit-lift closes both. Slot into the each-codegen follow-on (ss20). <!-- @gap id=g-emit-lift-markup-text-interp-not-lowered sev=MED status=open -->
+
+### G-LIBRARY-MODE-SQL-NO-DB-CONTEXT — a library/pure-fn `.scrml` (no `<program>`) cannot run `?{}` SQL; the §44.7.1 module-with-db-context lowering (W5a/W5b) is unbuilt — `NEW S220 (sharpens dpa OQ-F1); MED; build-candidate scoped`
+A `.scrml` compiled as a library/module (§21.5 — exports fns, NO `<program>`) cannot run `?{}`: SQL needs a db-resolution scope and a library has no `<program db=>` ancestor. §44.7.1 ratifies the fix (the library declares its OWN top-level `<db src>` → *module-with-db-context*; the module owns its connection) but the lowering is STAGED + UNBUILT — today a library `?{}` hits `E-SQL-004` / `E-SQL-009` / "does not emit cleanly as a library export". **Built (S145):** emission shaping (`--mode library` + suppress the `.server.js` route wrapper for body-escalated fns) + §21.5.1 export-modifier parsing. **Remaining = W5a + W5b:** W5a auto-detect-library (classify a no-`<program>`-exports file as library without the explicit flag; api.js/codegen/index.ts/module-resolver; ~3-6h) + W5b cross-file-`?{}`-resolve (resolve `?{}` against the file's OWN `<db src>`; cross-file db-context travel to the importing page; narrow `E-SQL-009` to the no-`<db>` case; route-inference.ts + db-driver.ts/emit-server.ts + module-resolver; ~10-18h). EXTENDS the existing `<program db>` resolution infra (not new) — survey-first per depth-of-survey (likely less). **First consumer: flogence** (scrml-authored tooling that wants SQL; on TS bridge/digest today). Full scope + build sub-steps: `docs/changes/library-mode-db-w5ab-2026-06-25/SCOPE.md`. Sharpens the banked dpa OQ-F1 stub. <!-- @gap id=g-library-mode-sql-no-db-context sev=MED status=open -->
