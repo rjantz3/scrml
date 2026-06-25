@@ -3,7 +3,10 @@
 Validation of the 11 findings in `ALL-FINDINGS.md` (authored during the Cheese
 Craft port, `rjantz3/cheese_craft`) against this repository's compiler.
 
-- Compiler: scrml v0.7.0 (`package.json`), HEAD at validation time `2111f9a`.
+- Compiler: scrml v0.7.0 (`package.json`). Originally validated at `2111f9a`;
+  **revalidated after rebasing onto upstream-synced `origin/main` `2a4bf8a`**
+  (adds s219 `<endpoint>` SPEC §61 + bookkeeping). All 11 verdicts below are
+  unchanged on the new base — the new commits do not touch any finding area.
 - Method: each finding re-reproduced from its standalone repro (or an equivalent
   minimal one) using `bun run compiler/src/cli.js compile|generate …` and
   inspecting the emitted artifacts / diagnostics. Browser-runtime findings (06,
