@@ -34,7 +34,7 @@
  *  D-RI-PAGES — buildPageRouteTree must accept `/pages/` as a route
  *               prefix alongside `/routes/` for the v0.3 corpus
  *               convention to be reachable. Without it,
- *               `scrml generate auth`'s pages/auth/login.scrml scaffold
+ *               `scrml generate auth`'s pages/login.scrml scaffold
  *               cannot resolve the default `/login` redirect.
  */
 
@@ -102,7 +102,7 @@ describe("§1 auth-required project without login page emits tightened diagnosti
   beforeEach(setupTmp);
   afterEach(teardownTmp);
 
-  test("compile fires both tightened messages naming `scrml generate auth` + `pages/auth/login.scrml`", async () => {
+  test("compile fires both tightened messages naming `scrml generate auth` + `pages/login.scrml`", async () => {
     const appPath = join(TMP, "app.scrml");
     writeFileSync(appPath, `<program auth="required">\n  <div>\n    <h1>Protected</h1>\n  </div>\n</program>\n`, "utf8");
 
@@ -123,9 +123,9 @@ describe("§1 auth-required project without login page emits tightened diagnosti
 
     // Tightened contract — both must contain the scaffold command + path.
     expect(warn[0].message).toContain("`scrml generate auth`");
-    expect(warn[0].message).toContain("`pages/auth/login.scrml`");
+    expect(warn[0].message).toContain("`pages/login.scrml`");
     expect(info[0].message).toContain("`scrml generate auth`");
-    expect(info[0].message).toContain("`pages/auth/login.scrml`");
+    expect(info[0].message).toContain("`pages/login.scrml`");
 
     // De-jargonization — no internal OQ-A2-E reference.
     expect(info[0].message).not.toContain("OQ-A2-E");
@@ -148,7 +148,7 @@ describe("§2 generated scaffold contains a working login page (not a placeholde
     );
 
     await runGenerateInTmp(["auth"]);
-    const scaffoldPath = join(TMP, "pages", "auth", "login.scrml");
+    const scaffoldPath = join(TMP, "pages", "login.scrml");
     expect(existsSync(scaffoldPath)).toBe(true);
 
     const scaffolded = readFileSync(scaffoldPath, "utf8");
@@ -187,7 +187,7 @@ describe("§2 generated scaffold contains a working login page (not a placeholde
 
     const { logs } = await runGenerateInTmp(["auth"]);
     expect(existsSync(join(TMP, "pages", "signin.scrml"))).toBe(true);
-    expect(existsSync(join(TMP, "pages", "auth", "login.scrml"))).toBe(false);
+    expect(existsSync(join(TMP, "pages", "login.scrml"))).toBe(false);
     // Next-steps echoes the actual login route.
     expect(logs.join("\n")).toContain("visit /signin");
   });

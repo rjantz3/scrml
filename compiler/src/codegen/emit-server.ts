@@ -13,6 +13,7 @@ import { emitServerParamCheck, parsePredicateAnnotation } from "./emit-predicate
 import { resolveDbDriver } from "./db-driver.ts";
 import { returnTypeAllowsAbsence, SERVER_WIRE_ENCODER_HELPER } from "./wire-format.ts";
 import { SERVER_LOG_HELPER } from "./log-loc.ts";
+import { dirname as _pathDirname, resolve as _pathResolve, relative as _pathRelative } from "node:path";
 import { parseExprToNode } from "../expression-parser.ts";
 import { extractCalleeNames } from "./scheduling.ts";
 import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-parse-variant.ts";
@@ -1481,6 +1482,37 @@ export function generateServerJs(
         if (_hit) _diagSyncCb(_hit, n.span);
       }
 
+      // ss19 #12 (g-sql-in-arrow-body-invalid-js) — DIAGNOSTIC. A `?{}` SQL
+      // block inside an arrow / function-expression body cannot be lowered: SQL
+      // is lowered at the STATEMENT level of a server-function body (the per-stmt
+      // sqlNode pass), but an arrow/lambda body parses as an OPAQUE escape-hatch
+      // whose raw text is emitted VERBATIM (rewriteServerExprArrowBody). The
+      // `?{...}` therefore leaks into the output as invalid JS — pre-fix this
+      // surfaced as the generic E-CODEGEN-INVALID-JS ("compiler defect, please
+      // report it"), which hid the real, fixable cause. We diagnose it precisely
+      // here. The `?{` + backtick signature (a SQL tagged-template opener) avoids
+      // false-positives on a ternary-object (`cond?{a:1}:b` has no backtick).
+      // Pushing a FATAL error also suppresses the emitted-JS parse gate (api.js
+      // Bug 70 hasPriorFatalError), so the user sees ONE actionable diagnostic.
+      if (n.kind === "escape-hatch" && typeof n.raw === "string"
+          && (n.nativeKind === "ArrowFunctionExpression" || n.nativeKind === "FunctionExpression")
+          && /\?\{\s*`/.test(n.raw)) {
+        const _sp = (n.span ?? {}) as { file?: string; start?: number; end?: number; line?: number; col?: number };
+        errors.push(new CGError(
+          "E-SQL-009",
+          "E-SQL-009: a `?{}` SQL block appears inside an arrow / lambda body, where the " +
+          "compiler cannot lower it. SQL blocks are lowered at the STATEMENT level of a " +
+          "server-function body; an arrow / lambda body is opaque to that pass, so the " +
+          "`?{...}` would leak verbatim into the emitted JavaScript. Move the SQL into the " +
+          "enclosing server function's body — e.g. replace `const ins = (x) => { ?{`...`}.run() }` " +
+          "with a server function `function ins(x) { ?{`...`}.run() }` and call it — or hoist the " +
+          "query to a `const` / `let` statement at the function-body level and reference the " +
+          "result inside the arrow.",
+          { file: filePath ?? _sp.file ?? "", start: _sp.start ?? 0, end: _sp.end ?? 0, line: _sp.line ?? 1, col: _sp.col ?? 1 },
+          "error",
+        ));
+      }
+
       for (const k in n) {
         const v = n[k];
         if (Array.isArray(v)) { for (const ch of v) _walk(ch); }
@@ -2936,6 +2968,33 @@ export function generateServerJs(
         !connStr.startsWith("sqlite:") &&
         connStr !== ":memory:"
       ) {
+        // ss19 #9 (g-db-src-compile-vs-runtime-path) — express the emitted path
+        // relative to the project root (the runtime cwd) so every source file
+        // that references the SAME physical db emits the SAME runtime path. The
+        // compiler resolves `src=` file-relative (protect-analyzer), but the
+        // emitted `sqlite:` literal is opened CWD-relative at runtime — so a
+        // <page> in a subdir (`src="../m.db"`) opened a DIFFERENT file than the
+        // root entry (`src="./m.db"`) when both run from the project root →
+        // "no such table". We re-relativize ONLY for files NOT at the project
+        // root; a root-level file keeps its verbatim src (the common single-dir
+        // case stays byte-identical). `relative(root, absDb)` always yields a
+        // path that, from cwd=root, resolves to absDb (a leading `..` for an
+        // out-of-root db is correct, matching the file-relative resolution).
+        const _baseDir = (fileAST as any)._outputBaseDir;
+        if (
+          typeof _baseDir === "string" && _baseDir.length > 0 &&
+          typeof filePath === "string" && filePath.length > 0
+        ) {
+          const _resolvedBase = _pathResolve(_baseDir);
+          const _sourceDir = _pathDirname(_pathResolve(filePath));
+          if (_sourceDir !== _resolvedBase) {
+            const _absDb = _pathResolve(_sourceDir, connStr);
+            const _relToRoot = _pathRelative(_resolvedBase, _absDb);
+            if (_relToRoot.length > 0) {
+              connStr = _relToRoot.replace(/\\/g, "/");
+            }
+          }
+        }
         connStr = "sqlite:" + connStr;
       }
       declLines.push(`const ${ident} = new SQL(${JSON.stringify(connStr)});`);

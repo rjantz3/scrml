@@ -26,7 +26,7 @@
  *   - Read the project's <program> root file (heuristic: app.scrml in CWD,
  *     or first .scrml file under CWD that contains <program>).
  *   - Resolve the configured login route — default `/login` per SPEC §52.13.
- *     With v0.3 filesystem routing this lands at `pages/auth/login.scrml`.
+ *     With v0.3 filesystem routing this lands at `pages/login.scrml`.
  *   - If a target file already exists at the resolved path, the generator
  *     skips with a warning (never overwrites — adopter's edits are
  *     load-bearing).
@@ -292,7 +292,7 @@ function generateAuth(opts) {
   //      the scaffold lands where the auth gate actually points
   //      (e.g., /signin → pages/signin.scrml). v0.3 filesystem-routing
   //      maps URL pattern `/foo/bar` → `pages/foo/bar.scrml`.
-  //   4. default: pages/auth/login.scrml under the project root
+  //   4. default: pages/login.scrml under the project root
   //      (filesystem-routing convention; matches default loginRedirect=/login)
   let outAbs;
   if (targetPath) {
@@ -301,16 +301,16 @@ function generateAuth(opts) {
     outAbs = resolve(cwd, targetDir, "login.scrml");
   } else if (explicitLoginRedirect && explicitLoginRedirect !== "/login") {
     // Strip leading slash; treat root-redirect "/" as a degenerate
-    // case that falls back to the default pages/auth/login.scrml so
+    // case that falls back to the default pages/login.scrml so
     // we never write to pages/.scrml or similar.
     const trimmed = explicitLoginRedirect.replace(/^\/+/, "");
     if (trimmed.length === 0) {
-      outAbs = resolve(cwd, "pages", "auth", "login.scrml");
+      outAbs = resolve(cwd, "pages", "login.scrml");
     } else {
       outAbs = resolve(cwd, "pages", `${trimmed}.scrml`);
     }
   } else {
-    outAbs = resolve(cwd, "pages", "auth", "login.scrml");
+    outAbs = resolve(cwd, "pages", "login.scrml");
   }
 
   // Read template body.
@@ -369,7 +369,7 @@ export function runGenerate(args) {
 Scaffold adopter-owned source files keyed to the project's structure.
 
 Types:
-  auth              Login page scaffold (pages/auth/login.scrml)
+  auth              Login page scaffold (pages/login.scrml)
 
 Options:
   --target=<path>   Explicit output path (relative to CWD or absolute)
@@ -378,7 +378,7 @@ Options:
   --help, -h        Show this message
 
 Examples:
-  scrml generate auth                        # writes pages/auth/login.scrml
+  scrml generate auth                        # writes pages/login.scrml
   scrml generate auth --target=./login.scrml # writes to CWD/login.scrml
   scrml generate auth --target-dir=./pages   # writes ./pages/login.scrml
 

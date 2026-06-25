@@ -84,3 +84,76 @@ describe("F-SCHEMA-001 — < schema> DDL as a ColumnDef source", () => {
     expect(cols).toEqual(["email", "id"]);
   });
 });
+describe("g-schema-block-raw-ddl — raw `CREATE TABLE` inside `< schema>` is a ColumnDef source", () => {
+  test("raw CREATE TABLE in `< schema>` (no `?{}`, missing DB) -> no E-PA-002, views generated", () => {
+    const src = `<program db="./nope-raw.db">
+<schema>
+    CREATE TABLE items (id INTEGER PRIMARY KEY, label TEXT NOT NULL);
+</>
+<db src="./nope-raw.db" tables="items">
+</>
+</>`;
+    const { protectAnalysis, errors } = paFor(src, "/tmp/_rawddl/app.scrml");
+    // Raw DDL in < schema> fills the missing-DB gap exactly like a ?{} CREATE TABLE.
+    expect(errors.some((e) => e.code === "E-PA-002")).toBe(false);
+    const view = [...protectAnalysis.views.values()][0];
+    expect(view).toBeDefined();
+    const items = view.tables.get("items");
+    expect(items).toBeDefined();
+    expect(items.fullSchema.map((c) => c.name).sort()).toEqual(["id", "label"]);
+  });
+
+  test("multiple raw CREATE TABLE statements (incl. IF NOT EXISTS) are all harvested", () => {
+    const src = `<program db="./nope-raw2.db">
+<schema>
+    CREATE TABLE items (id INTEGER PRIMARY KEY, label TEXT);
+    CREATE TABLE IF NOT EXISTS tags (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
+</>
+<db src="./nope-raw2.db" tables="items,tags">
+</>
+</>`;
+    const { protectAnalysis, errors } = paFor(src, "/tmp/_rawddl2/app.scrml");
+    expect(errors.some((e) => e.code === "E-PA-002")).toBe(false);
+    const view = [...protectAnalysis.views.values()][0];
+    expect(view.tables.get("items")).toBeDefined();
+    expect(view.tables.get("tags")).toBeDefined();
+    expect(view.tables.get("tags").fullSchema.map((c) => c.name).sort()).toEqual(["id", "name"]);
+  });
+
+  test("a `?{}`-harvested CREATE TABLE wins over a raw `< schema>` CREATE TABLE (precedence)", () => {
+    // The < schema> raw DDL declares `users` with only id; the ?{} CREATE TABLE
+    // declares id + email. The materialized ?{} statement must win.
+    const src = `<program db="./nope-rawprec.db">
+<schema>
+    CREATE TABLE users (id INTEGER PRIMARY KEY);
+</>
+<db src="./nope-rawprec.db" tables="users">
+  \${
+    function _boot() {
+      ?{\`CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL)\`}.run()
+    }
+  }
+</>
+</>`;
+    const { protectAnalysis, errors } = paFor(src, "/tmp/_rawprec/app.scrml");
+    expect(errors.some((e) => e.code === "E-PA-002")).toBe(false);
+    const view = [...protectAnalysis.views.values()][0];
+    const cols = view.tables.get("users").fullSchema.map((c) => c.name).sort();
+    expect(cols).toEqual(["email", "id"]);
+  });
+
+  test("a raw `< schema>` covering only some tables still E-PA-002s for the uncovered table", () => {
+    const src = `<program db="./nope-rawpartial.db">
+<schema>
+    CREATE TABLE items (id INTEGER PRIMARY KEY, label TEXT);
+</>
+<db src="./nope-rawpartial.db" tables="items,ghosts">
+</>
+</>`;
+    const { errors } = paFor(src, "/tmp/_rawpartial/app.scrml");
+    const e002 = errors.filter((e) => e.code === "E-PA-002");
+    expect(e002.length).toBe(1);
+    expect(e002[0].message).toContain("ghosts");
+    expect(e002[0].message).not.toContain("`items`");
+  });
+});

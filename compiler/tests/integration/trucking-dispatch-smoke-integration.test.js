@@ -333,7 +333,20 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
   const EXPECTED_BASELINE = {
     "I-AUTH-REDIRECT-UNRESOLVED": 1,
     "W-ATTR-001": 20,
-    "W-AUTH-001": 20,
+    // ss19 #6/#7 (auth-precedence-2026-06-25): W-AUTH-001 20 -> 0, REMOVED.
+    // Every protect= page in this corpus declares an EXPLICIT `<page auth=...>`
+    // (`auth="required"` on the 18 app pages, `auth="optional"` on login/
+    // register). The pre-fix RI Step 8b did not recognise page-level auth= and
+    // auto-escalated all of them to auth="required" + fired W-AUTH-001 ("no
+    // explicit auth= attribute") — a FALSE warning on every page (the S94 note
+    // above explicitly recorded this as a known gap: "<page auth=required> is
+    // not yet recognized by the auth declaration validator"). The fix consults
+    // the explicit page-level declaration: optional/none pages keep their mode
+    // (no escalation), required pages stay gated (authMiddleware still
+    // registered, same values — `autoEscalated` has no downstream reader), and
+    // W-AUTH-001 fires ONLY when no declaration exists anywhere. None remain in
+    // this corpus, so the code is REMOVED from the baseline (a 0-count entry
+    // would trip the "no UNEXPECTED codes" inverse). Aggregate 59 -> 39.
     "W-AUTH-LOGIN-MISSING": 1,
     "W-CG-CHUNK-EMPTY": 1,
     "W-CG-CHUNK-PREFETCH-UNRESOLVED": 1,

@@ -2654,6 +2654,89 @@ function buildClosureCapturesForFunction(fnNode: FunctionDeclNode): Set<string> 
   return captures;
 }
 
+/**
+ * Resolve a file's EXPLICIT `auth=` declaration for the protect= auto-escalation
+ * precedence check in Step 8b.
+ *
+ * The adopter can declare auth at two sites, and they reach this stage by two
+ * different paths:
+ *
+ *   - `<program auth=...>` — captured into `fileAST.authConfig` by the
+ *     `computeProgramConfig` pre-codegen pass. Step 8a already registers the
+ *     `auth="required"` case as middleware; the `"optional"` / `"none"` cases
+ *     are NOT, so they would otherwise be wrongly auto-escalated in 8b.
+ *   - `<page auth=...>` — read directly from the markup node here. `<page auth=>`
+ *     is page-level and is NOT captured by `authConfig` at all (that pass only
+ *     inspects `<program>`), so without this walk an explicit `<page>` auth mode
+ *     is invisible to Step 8b.
+ *
+ * Program-level wins when both are present (it is the file-wide config). Returns
+ * `null` when no `auth=` is declared anywhere in the file. `<page>` carries no
+ * `sessionExpiry=` attribute (per the attribute registry), so that slot is
+ * always `null` for the page-level branch.
+ */
+function getExplicitAuthDeclaration(fileAST: FileAST): {
+  auth: string;
+  loginRedirect: string | null;
+  csrf: string | null;
+  sessionExpiry: string | null;
+} | null {
+  // 1. Program-level: <program auth=...> via computeProgramConfig. CE wraps the
+  //    FileAST in `.ast`; bare-FileAST inputs (unit tests) keep authConfig at
+  //    the top level. Try both, matching the idiom used in Step 8a.
+  const authConfig =
+    fileAST.authConfig ?? ((fileAST as any).ast ? (fileAST as any).ast.authConfig : null);
+  if (authConfig && authConfig.auth) {
+    return {
+      auth: authConfig.auth,
+      loginRedirect: authConfig.loginRedirect ?? null,
+      csrf: authConfig.csrf ?? null,
+      sessionExpiry: authConfig.sessionExpiry ?? null,
+    };
+  }
+
+  // 2. Page-level: first <page auth=...> markup node anywhere in the tree.
+  const nodes: any[] =
+    (fileAST as any).nodes ?? ((fileAST as any).ast ? (fileAST as any).ast.nodes : []) ?? [];
+
+  const readStringAttr = (attrs: any[] | undefined, name: string): string | null => {
+    if (!Array.isArray(attrs)) return null;
+    const a = attrs.find((x: any) => x && x.name === name);
+    if (!a || !a.value || a.value.kind !== "string-literal") return null;
+    return a.value.value ?? null;
+  };
+
+  let found: {
+    auth: string;
+    loginRedirect: string | null;
+    csrf: string | null;
+    sessionExpiry: string | null;
+  } | null = null;
+
+  const walk = (ns: any[] | undefined): void => {
+    if (found || !Array.isArray(ns)) return;
+    for (const node of ns) {
+      if (found) return;
+      if (!node || node.kind !== "markup") continue;
+      if (node.tag === "page") {
+        const authVal = readStringAttr(node.attrs, "auth");
+        if (authVal) {
+          found = {
+            auth: authVal,
+            loginRedirect: readStringAttr(node.attrs, "loginRedirect"),
+            csrf: readStringAttr(node.attrs, "csrf"),
+            sessionExpiry: null, // <page> carries no sessionExpiry= attribute.
+          };
+          return;
+        }
+      }
+      walk(node.children);
+    }
+  };
+  walk(nodes);
+  return found;
+}
+
 // ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
@@ -3808,8 +3891,58 @@ export function runRI(input: RIInput): RIOutput {
       }
     }
 
+    // Map each file's EXPLICIT auth= declaration (program- OR page-level) for
+    // the precedence check below. <program auth="required"> is already in
+    // authMiddleware via Step 8a; this captures the cases 8a does not register:
+    // program "optional"/"none" AND every <page auth=> (page-level auth is not
+    // carried on authConfig at all). See getExplicitAuthDeclaration.
+    const explicitAuthByFile = new Map<string, ReturnType<typeof getExplicitAuthDeclaration>>();
+    for (const fileAST of files) {
+      const decl = getExplicitAuthDeclaration(fileAST);
+      if (decl) explicitAuthByFile.set(fileAST.filePath, decl);
+    }
+
     for (const filePath of filesWithProtectedFields) {
-      if (authMiddleware.has(filePath)) continue; // explicit auth= takes precedence
+      // <program auth="required"> registered in 8a — explicit, takes precedence.
+      if (authMiddleware.has(filePath)) continue;
+
+      // ss19 #6/#7 (the login-wall bug): a file may carry an EXPLICIT auth=
+      // declaration that 8a does not register — `<program auth="optional"|"none">`
+      // or any `<page auth=>`. Auto-escalating those to auth="required" wrongly
+      // overrode the adopter's choice and force-installed `_scrml_auth_check` on
+      // (e.g.) a login page's own RPC, which then 302'd to /login — making the
+      // page permanently unauthenticatable. Consult the explicit declaration and
+      // honour it; the W-AUTH-001 "no explicit auth=" warning is truthful ONLY
+      // when no declaration exists.
+      const explicit = explicitAuthByFile.get(filePath) ?? null;
+
+      if (explicit && (explicit.auth === "optional" || explicit.auth === "none")) {
+        // Explicit non-required mode. Do NOT escalate to auth="required" and do
+        // NOT fire W-AUTH-001 — the page keeps its declared mode. protect= still
+        // strips the column from client serialization via the protect-analyzer
+        // (independent of authMiddleware), so the sensitive field never reaches
+        // the client regardless of the auth mode.
+        continue;
+      }
+
+      if (explicit && explicit.auth === "required") {
+        // Explicit page-level auth="required" (program-level "required" already
+        // returned above via the 8a .has() guard). Register the gate from the
+        // page's own settings so the protected page stays gated, but do NOT fire
+        // W-AUTH-001 — the auth= IS explicit. csrf defaults to "auto" (sensitive
+        // protect= fields present) and sessionExpiry to "1h" (<page> carries no
+        // sessionExpiry= attribute).
+        authMiddleware.set(filePath, {
+          filePath,
+          auth: "required",
+          loginRedirect: explicit.loginRedirect ?? "/login",
+          csrf: explicit.csrf ?? "auto",
+          sessionExpiry: explicit.sessionExpiry ?? "1h",
+        });
+        continue;
+      }
+
+      // No explicit auth= anywhere — auto-escalate + warn (correct; preserved).
       authMiddleware.set(filePath, {
         filePath,
         auth: "required",

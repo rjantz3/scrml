@@ -2595,6 +2595,11 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // (GITI-020: boundary + channelOwnedCells also threaded so a server-side
       // channel-cell write nested in if/else reaches the broadcast-wire arm.)
       return emitIfStmt(node, {
+        // ss19 #8 — thread peer-call info so a server-fn -> sibling-server-fn
+        // call inside an if condition/body lowers to `await <peer>()` instead
+        // of a bare unawaited Promise (completes the b2bf9959 threading).
+        serverFnNames: opts.serverFnNames,
+        syncPeerCalls: opts.syncPeerCalls,
         derivedNames: opts.derivedNames,
         synthCellKeys: opts.synthCellKeys,
         declaredNames: opts.declaredNames,
@@ -2628,6 +2633,9 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // (mirrors the if-stmt dispatch above; for-stmt previously dropped them →
       // silent `_scrml_reactive_get(...).advance(...)` miscompile).
       return emitForStmt(node, {
+        // ss19 #8 — peer-call threading (see if-stmt dispatch above).
+        serverFnNames: opts.serverFnNames,
+        syncPeerCalls: opts.syncPeerCalls,
         dbVar: opts.dbVar,
         declaredNames: opts.declaredNames,
         insideFunctionBody: opts.insideFunctionBody,
@@ -2655,12 +2663,12 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // R25-Bug-42 (S138): thread `boundary` so SQL-bearing yield/return
       // statements inside the loop body emit via the server case "sql" path
       // when the enclosing fn is server-bound.
-      return emitWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}) });
+      return emitWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, syncPeerCalls: opts.syncPeerCalls, ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}) });
 
     case "do-while-stmt":
       // R25-Bug-42 (S138): thread `boundary` so SQL-bearing yield/return
       // statements inside the loop body emit via the server case "sql" path.
-      return emitDoWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}) });
+      return emitDoWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, syncPeerCalls: opts.syncPeerCalls, ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}) });
 
     case "break-stmt":
       return emitBreakStmt(node);

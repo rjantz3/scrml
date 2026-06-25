@@ -529,7 +529,7 @@ function crossRefRedirects(
       // `/login`, suggest `--target-dir` so the adopter can place the
       // scaffold under the matching page path.
       const fixHint = redirect === "/login"
-        ? `Run \`scrml generate auth\` to scaffold a working login page at \`pages/auth/login.scrml\`.`
+        ? `Run \`scrml generate auth\` to scaffold a working login page at \`pages/login.scrml\`.`
         : `Run \`scrml generate auth --target=./pages${redirect}.scrml\` to scaffold a working login page at the redirect path.`;
       errors.push({
         code: "I-AUTH-REDIRECT-UNRESOLVED",
@@ -560,7 +560,7 @@ function crossRefRedirects(
     const targets = [...unresolvedTargets].map(t => `"${t}"`).join(", ");
     // Tightened S94: lead with the actionable `scrml generate auth`
     // command and name the exact file the scaffold writes
-    // (`pages/auth/login.scrml`) so the adopter has a one-line fix.
+    // (`pages/login.scrml`) so the adopter has a one-line fix.
     // The "author manually" alternative is preserved as a secondary
     // path for adopters who need a custom login flow.
     errors.push({
@@ -570,7 +570,7 @@ function crossRefRedirects(
         `Auth gates declare redirect target(s) ${targets} but no page in ` +
         `the compilation unit matches any of these paths. The runtime ` +
         `auth-check will 302 to a 404. Run \`scrml generate auth\` to ` +
-        `scaffold a working login page at \`pages/auth/login.scrml\` — ` +
+        `scaffold a working login page at \`pages/login.scrml\` — ` +
         `or author one at the redirect path manually. (SPEC §40.1.1.)`,
       span: firstRedirectGate.span,
       filePath: firstRedirectGate.filePath,

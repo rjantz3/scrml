@@ -814,6 +814,14 @@ export function runCG(input: CgInput): CgOutput {
     // ---------------------------------------------------------------------------
     // Generate server JS — emitted in both browser and library mode.
     // ---------------------------------------------------------------------------
+    // ss19 #9 (g-db-src-compile-vs-runtime-path) — thread the project root
+    // (outputBaseDir = the runtime cwd) onto fileAST so emit-server can express
+    // the emitted `sqlite:` path relative to a CONSISTENT base. Without this, a
+    // <page> in a subdir (`src="../m.db"`) and the root entry (`src="./m.db"`)
+    // reference the same physical db at compile time but emit DIFFERENT runtime
+    // paths → the subdir page opens a different (empty) file from the project
+    // root. null for legacy single-file callers (handled verbatim downstream).
+    (fileAST as any)._outputBaseDir = cgOutputBaseDir;
     let serverJs: string | null = codegenStage("emit-server", () =>
       generateServerJs(fileAST, safeRouteMap, errors, authMW, middlewareCfg, batchPlan, batchPlannerErrors, mode)
     ) || null;

@@ -213,4 +213,93 @@ describe("Bug 18 — scrml:NAME client imports do not emit as bare ES specifiers
     expect(runtimeJs).not.toContain("--- chunk: stdlib-crypto ---");
     expect(runtimeJs).not.toContain("--- chunk: stdlib-host ---");
   });
+
+  // -------------------------------------------------------------------------
+  // ss19 #5 — server-only `scrml:` stdlib imports must not leak into client.js
+  // -------------------------------------------------------------------------
+  //
+  // A page that imports a server-only capability (`scrml:store`/`auth`/`crypto`)
+  // and uses it ONLY inside a server-fn body still had the lowered read
+  // `const { x } = _scrml_stdlib.<mod>;` emitted into the CLIENT bundle. Client
+  // emission lowers the server fn to a fetch stub (the body — and the binding
+  // name — never appears client-side), and the server-only module's runtime
+  // chunk is never shipped, so `_scrml_stdlib.<mod>` is `undefined` and the
+  // destructure threw a TypeError at module load, killing the whole page. The
+  // GITI-003 post-prune pass now also drops these lowered reads when every
+  // bound name is unreferenced in the remaining client body.
+
+  test("§7  scrml: stdlib import used only in a server fn is stripped from client.js", () => {
+    const serverOnly = `<program title="ss19 server-only">
+    \${
+        import { createSessionStore } from 'scrml:store'
+
+        <msg> = ""
+
+        server function load() ! string {
+            const store = createSessionStore("sess.db")
+            return "loaded"
+        }
+
+        on mount { @msg = load() }
+    }
+    <p>\${@msg}</p>
+</program>
+`;
+    const src = fx("c7/server-only.scrml", serverOnly);
+    const outDir = join(TMP, "c7/dist");
+    const result = compileScrml({ inputFiles: [src], outputDir: outDir, write: true, log: () => {} });
+    expect(result.errors).toEqual([]);
+    const clientJs = readFileSync(join(outDir, "server-only.client.js"), "utf8");
+    // The lowered `const { createSessionStore } = _scrml_stdlib.store;` read must
+    // be gone — store's runtime chunk is server-only (never shipped to client),
+    // so destructuring `_scrml_stdlib.store` (undefined) would throw at load.
+    expect(clientJs).not.toContain("_scrml_stdlib.store");
+    expect(clientJs).not.toContain("createSessionStore");
+    // The client bundle must still parse (no dangling destructure of undefined).
+    expect(() => new Function(clientJs)).not.toThrow();
+    // Server side keeps the capability — the strip is client-only.
+    const serverJs = readFileSync(join(outDir, "server-only.server.js"), "utf8");
+    expect(serverJs).toContain("createSessionStore");
+  });
+
+  test("§8  scrml: stdlib import used in client code is preserved (no over-strip)", () => {
+    const src = fx("c8/repro.scrml", REPRO);
+    const outDir = join(TMP, "c8/dist");
+    const result = compileScrml({ inputFiles: [src], outputDir: outDir, write: true, log: () => {} });
+    expect(result.errors).toEqual([]);
+    const clientJs = readFileSync(join(outDir, "repro.client.js"), "utf8");
+    // sortBy drives the client render loop — the read must survive the prune.
+    expect(clientJs).toContain("const { sortBy } = _scrml_stdlib.data;");
+  });
+
+  test("§9  mixed-binding stdlib import preserved when any name is client-used", () => {
+    const mixed = `<program title="ss19 mixed">
+    \${
+        import { sortBy, groupBy } from 'scrml:data'
+
+        <items> = [{ name: "b", order: 2 }, { name: "a", order: 1 }]
+        <buckets> = ""
+
+        server function bucketize() ! string {
+            const g = groupBy(@items, "name")
+            return "ok"
+        }
+
+        on mount { @buckets = bucketize() }
+    }
+    <ul>
+        \${ for (let it of sortBy(@items, "order")) {
+            lift <li>\${it.name}</li>
+        } }
+    </ul>
+</program>
+`;
+    const src = fx("c9/mixed.scrml", mixed);
+    const outDir = join(TMP, "c9/dist");
+    const result = compileScrml({ inputFiles: [src], outputDir: outDir, write: true, log: () => {} });
+    expect(result.errors).toEqual([]);
+    const clientJs = readFileSync(join(outDir, "mixed.client.js"), "utf8");
+    // sortBy is client-used → the whole read is kept (both names), not pruned.
+    expect(clientJs).toContain("const { sortBy, groupBy } = _scrml_stdlib.data;");
+  });
 });

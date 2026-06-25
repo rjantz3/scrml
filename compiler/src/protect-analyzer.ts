@@ -444,6 +444,22 @@ function extractCreateTableStatements(nodes: ASTNode[]): Map<string, string> {
   return result;
 }
 
+/**
+ * Harvest raw `CREATE TABLE … (…)` statements from a plain text string into
+ * `out` (keyed by lowercased table name), reusing the same `CREATE_TABLE_RE`
+ * the `?{}` SQL-node harvester uses. Only fills keys not already present, so a
+ * higher-precedence source already in `out` always wins. Used for the raw-DDL
+ * `< schema>` form (g-schema-block-raw-ddl).
+ */
+function harvestRawCreateTables(text: string, out: Map<string, string>): void {
+  CREATE_TABLE_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = CREATE_TABLE_RE.exec(text)) !== null) {
+    const key = m[1].toLowerCase();
+    if (!out.has(key)) out.set(key, m[0]);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // F-SCHEMA-001 — `< schema>` DDL as a third ColumnDef source (§39, §14.8)
 // ---------------------------------------------------------------------------
@@ -467,6 +483,14 @@ function extractCreateTableStatements(nodes: ASTNode[]): Map<string, string> {
  *
  * The body text is the concatenated `text`-kind children of the `< schema>`
  * node (the same shape schema-differ's own consumers read).
+ *
+ * g-schema-block-raw-ddl — a `< schema>` block may instead carry RAW
+ * `CREATE TABLE … (…)` SQL (the same DDL the `?{}` harvester reads) written
+ * directly in the block rather than the declarative `tableName { … }` form. We
+ * harvest those statements too (via `harvestRawCreateTables`) so a raw-DDL
+ * `< schema>` feeds the shadow DB exactly like a `?{}` CREATE TABLE — otherwise
+ * the raw form reaches NEITHER `parseSchemaBlock` NOR the `?{}` walker and
+ * E-PA-002 false-fires even though the author DID supply DDL.
  */
 function extractSchemaCreateTableStatements(nodes: ASTNode[]): Map<string, string> {
   const result = new Map<string, string>();
@@ -517,6 +541,14 @@ function extractSchemaCreateTableStatements(nodes: ASTNode[]): Map<string, strin
             }
           }
         }
+        // g-schema-block-raw-ddl — the `< schema>` block may ALSO carry raw
+        // `CREATE TABLE … (…)` SQL (the same DDL the `?{}` harvester reads),
+        // written directly here instead of the declarative `tableName { … }`
+        // form. Harvest those too so a raw-DDL `< schema>` feeds the shadow DB
+        // exactly like a `?{}` CREATE TABLE. Declarative tables registered
+        // above win within this source; the runPA merge keeps a `?{}` CREATE
+        // TABLE / live DB winning over the whole `< schema>` source.
+        harvestRawCreateTables(body, result);
       }
     }
     for (const key of Object.keys(node)) {

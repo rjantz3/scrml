@@ -6,7 +6,7 @@
  * copy-pasteable fix path. The S93 hand-off + S94 roadmap flagged the
  * pre-S94 messages as too generic — neither directly named the
  * `scrml generate auth` command + the exact scaffold output path
- * (`pages/auth/login.scrml`) that resolves the diagnostic. This file
+ * (`pages/login.scrml`) that resolves the diagnostic. This file
  * locks the tightened contract in place.
  *
  * Sister files:
@@ -119,7 +119,7 @@ function routeMapWithPages(urlPatterns: string[]): RouteMap {
 // ---------------------------------------------------------------------------
 
 describe("§1 W-AUTH-LOGIN-MISSING tightened message contract", () => {
-  test("message names `scrml generate auth` AND the scaffold path `pages/auth/login.scrml`", () => {
+  test("message names `scrml generate auth` AND the scaffold path `pages/login.scrml`", () => {
     const program = markup("program", [attr("auth", "required")]);
     const f = file("/abs/app.scrml", [program], REQUIRED_AUTH_DEFAULT);
     const rm = routeMapWithPages(["/"]);
@@ -132,7 +132,7 @@ describe("§1 W-AUTH-LOGIN-MISSING tightened message contract", () => {
     // The command — copy-pasteable.
     expect(msg).toContain("`scrml generate auth`");
     // The exact output path — adopter can `ls` / `cat` it after run.
-    expect(msg).toContain("`pages/auth/login.scrml`");
+    expect(msg).toContain("`pages/login.scrml`");
     // The unresolved redirect target.
     expect(msg).toContain('"/login"');
     // The runtime consequence.
@@ -179,7 +179,7 @@ describe("§2 I-AUTH-REDIRECT-UNRESOLVED tightened message contract", () => {
 
     expect(msg).toContain('"/login"');
     expect(msg).toContain("`scrml generate auth`");
-    expect(msg).toContain("`pages/auth/login.scrml`");
+    expect(msg).toContain("`pages/login.scrml`");
     expect(msg).toContain("SPEC §40.1.1");
   });
 
@@ -196,7 +196,7 @@ describe("§2 I-AUTH-REDIRECT-UNRESOLVED tightened message contract", () => {
     expect(msg).toContain('"/signin"');
     expect(msg).toContain("`scrml generate auth --target=./pages/signin.scrml`");
     // Default-target language should NOT appear for non-default redirects.
-    expect(msg).not.toContain("`pages/auth/login.scrml`");
+    expect(msg).not.toContain("`pages/login.scrml`");
   });
 
   test("tightened message drops internal `OQ-A2-E` disposition jargon", () => {

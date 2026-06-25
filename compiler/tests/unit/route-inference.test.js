@@ -2105,8 +2105,8 @@ describe("buildPageRouteTree", () => {
   // -------------------------------------------------------------------------
   // D-RI-PAGES — v0.3 canonical pages/ prefix recognition (SPEC §47.9.2,
   // §40.8). The original implementation only recognized routes/ (legacy
-  // pre-v0.3 convention); v0.3 codified pages/ as canonical (e.g. the
-  // `scrml generate auth` scaffold writes to pages/auth/login.scrml).
+  // pre-v0.3 convention); v0.3 codified pages/ as canonical (e.g.
+  // an adopter login page at pages/auth/login.scrml).
   // Both prefixes are accepted; routes/ remains for backward compatibility.
   // -------------------------------------------------------------------------
 
@@ -2138,10 +2138,10 @@ describe("buildPageRouteTree", () => {
     expect(page.isCatchAll).toBe(false);
   });
 
-  test("pages/auth/login.scrml maps to /auth/login (scrml generate auth scaffold case)", () => {
+  test("pages/auth/login.scrml maps to /auth/login (nested pages/ path)", () => {
     // This is the load-bearing test for Batch A.1 / D-RI-PAGES:
-    // `scrml generate auth` lands its scaffold at pages/auth/login.scrml,
-    // and post-fix the route-inference pass recognises it. Adopters who
+    // an adopter authoring a login page at pages/auth/login.scrml relies
+    // on the route-inference pass recognising the nested pages/ path. Adopters who
     // set <program loginRedirect="/auth/login"> will then see the
     // I-AUTH-REDIRECT-UNRESOLVED + W-AUTH-LOGIN-MISSING diagnostics
     // clear on the next compile (Phase 3 integration test below).

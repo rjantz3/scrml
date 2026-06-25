@@ -2111,9 +2111,33 @@ export function generateClientJs(ctx: CompileContext): string {
   // unused) without this carve-out. Real compilations always go through
   // testMode: false.
   clientCode = ctx.testMode ? clientCode : clientStage(ctx, "post-prune-unused-imports", () => (function pruneUnusedClientImports(code: string): string {
-    const importRe = /^import\s+(?:\{([^}]*)\}|([A-Za-z_$][A-Za-z0-9_$]*))\s+from\s+(['"])([^'"]+)\3\s*;?\s*$/gm;
-    const imports: Array<{ match: string; start: number; end: number; names: string[]; isDefault: boolean; src: string }> = [];
+    // A removable region is a top-of-file binding declaration whose bound
+    // names may be dropped if unreferenced in the REMAINING client body. Two
+    // shapes are recognized:
+    //
+    //   - ES import   `import { a, b } from 'src';`         (GITI-003)
+    //     A hand-written JS/TS helper only called from server-fn bodies — the
+    //     fetch stub that replaces the body never references the helper, so the
+    //     import in `.client.js` points at a server-only module and 500s the
+    //     browser load.
+    //
+    //   - stdlib read `const { a, b } = _scrml_stdlib.<mod>;`  (#5 ss19)
+    //     A `scrml:` capability lowered at `emit-imports`. When every bound
+    //     name is referenced ONLY inside a server-fn body (which client
+    //     emission lowers to a fetch stub that never names the binding), the
+    //     read survives into `.client.js` and destructures `_scrml_stdlib.<mod>`
+    //     — `undefined` for a server-only module (store/auth/crypto, whose
+    //     runtime chunk is never shipped to the client), throwing a TypeError
+    //     at module load and killing the whole page. Both shapes share the
+    //     same ground-truth signal: the post-rewrite client body. Because
+    //     server-fn bodies are already lowered to fetch stubs at this point, a
+    //     binding's absence from the body proves it is server-only.
+    type Region = { start: number; end: number; names: string[]; keepWhole: boolean };
+    const regions: Region[] = [];
     let m: RegExpExecArray | null;
+
+    // (1) ES `import ... from '...'` statements (GITI-003).
+    const importRe = /^import\s+(?:\{([^}]*)\}|([A-Za-z_$][A-Za-z0-9_$]*))\s+from\s+(['"])([^'"]+)\3\s*;?\s*$/gm;
     while ((m = importRe.exec(code)) !== null) {
       const namedList = m[1];
       const defaultName = m[2];
@@ -2121,66 +2145,72 @@ export function generateClientJs(ctx: CompileContext): string {
       const names = namedList
         ? namedList.split(",").map(s => s.trim().split(/\s+as\s+/).pop()!).filter(Boolean)
         : [defaultName];
-      imports.push({
-        match: m[0],
-        start: m.index,
-        end: m.index + m[0].length,
-        names,
-        isDefault: !namedList,
-        src,
-      });
+      // Narrow targeting: only prune imports whose source is a plain external
+      // module specifier (user-written JS/TS that might be server-only).
+      // Preserve runtime-managed sources:
+      //   - `.client.js`   cross-file scrml outputs (resolved at runtime)
+      //   - `scrml:`       stdlib imports (these do NOT reach here — they lower
+      //                    to the `_scrml_stdlib` read handled in (2) — kept
+      //                    defensively)
+      //   - `vendor:`      external packages (resolved by bundler/runtime)
+      const keepWhole = src.startsWith("scrml:") || src.startsWith("vendor:") || src.endsWith(".client.js");
+      regions.push({ start: m.index, end: m.index + m[0].length, names, keepWhole });
     }
-    // Build the "body" of the code (everything NOT in an import stmt), so
-    // usage checks don't match the import statement itself.
+
+    // (2) stdlib reads `const { a, b: c } = _scrml_stdlib.<mod>;` (#5 ss19).
+    // Each destructure entry is `local` or `imported: local`; the name client
+    // code actually reads is the LOCAL (post-`:`) binding.
+    const stdlibRe = /^const\s+\{([^}]*)\}\s*=\s*_scrml_stdlib\.[A-Za-z_$][A-Za-z0-9_$]*\s*;?\s*$/gm;
+    while ((m = stdlibRe.exec(code)) !== null) {
+      const names = m[1]
+        .split(",")
+        .map(s => s.trim().split(":").pop()!.trim())
+        .filter(Boolean);
+      regions.push({ start: m.index, end: m.index + m[0].length, names, keepWhole: false });
+    }
+
+    if (regions.length === 0) return code;
+    regions.sort((a, b) => a.start - b.start);
+
+    // Build the "body" view: blank every removable region so a bound name is
+    // never counted as used by its own declaration line. Iterate from the end
+    // so earlier offsets stay valid.
     let body = code;
-    // Strip each import from the body view (from the end so offsets don't shift)
-    for (let i = imports.length - 1; i >= 0; i--) {
-      const imp = imports[i];
-      body = body.slice(0, imp.start) + " ".repeat(imp.end - imp.start) + body.slice(imp.end);
+    for (let i = regions.length - 1; i >= 0; i--) {
+      const r = regions[i];
+      body = body.slice(0, r.start) + " ".repeat(r.end - r.start) + body.slice(r.end);
     }
-    // Decide which imports to drop.
-    //
-    // Narrow targeting: only prune imports where the source is a plain
-    // external module specifier — i.e. a path to user-written JS/TS that
-    // might be server-only. Specifically preserve:
-    //   - cross-file scrml outputs  (`.client.js` — always keep; scrml
-    //     type decls and components are resolved at runtime via their
-    //     compiled files)
-    //   - scrml: stdlib imports     (runtime-provided)
-    //   - vendor: external packages (resolved by bundler/runtime)
-    //
-    // The common prune target is a hand-written JS helper that's only
-    // called from server fns — GITI-003.
+
+    // A region drops only when NONE of its bound names appear in the remaining
+    // body (whole-region grain — matches GITI-003 and the brief: strip when
+    // bound name(s) are referenced ONLY server-side; KEEP if any name is used
+    // in BOTH client and server code).
     const toDrop: Set<number> = new Set();
-    for (let i = 0; i < imports.length; i++) {
-      const imp = imports[i];
-      const src = imp.src;
-      // Preserve imports whose source is managed by the scrml runtime.
-      if (src.startsWith("scrml:") || src.startsWith("vendor:") || src.endsWith(".client.js")) continue;
-      const usedInBody = imp.names.some(name => {
-        // g-spread (2026-06-10): the old `(?<![.\\w$])` lookbehind rejected a
-        // spread-used import — `[...makeRange()]` was read as NOT used because
-        // the third spread `.` precedes the name, so a spread-only-used import
-        // was wrongly pruned (runtime ReferenceError). Split into a
-        // member-access-only lookbehind (a `.` itself preceded by ident-char /
-        // `)` / `]`, e.g. `obj.makeRange`) plus a word-boundary lookbehind, so
-        // a genuine member access of a DIFFERENT object still doesn't count as
-        // a use, while a spread call (`...makeRange`) does. Mirrors the
-        // rename-pass lookbehind above.
+    for (let i = 0; i < regions.length; i++) {
+      const r = regions[i];
+      if (r.keepWhole) continue;
+      const usedInBody = r.names.some(name => {
+        // g-spread (2026-06-10): a member-access-only lookbehind (a `.`
+        // preceded by ident-char / `)` / `]`, e.g. `obj.makeRange`) plus a
+        // word-boundary lookbehind, so a genuine member access of a DIFFERENT
+        // object does not count as a use, while a spread call (`...makeRange`)
+        // does.
         const useRe = new RegExp(`(?<![A-Za-z0-9_$)\\]]\\s*\\.\\s*)(?<![\\w$])${escapeRegex(name)}(?![\\w$])`, "");
         return useRe.test(body);
       });
       if (!usedInBody) toDrop.add(i);
     }
     if (toDrop.size === 0) return code;
-    // Rebuild the file with dropped imports removed.
+
+    // Rebuild the file with dropped regions removed (regions are sorted by
+    // start; cursor walks left-to-right).
     let result = "";
     let cursor = 0;
-    for (let i = 0; i < imports.length; i++) {
+    for (let i = 0; i < regions.length; i++) {
       if (toDrop.has(i)) {
-        result += code.slice(cursor, imports[i].start);
-        // skip the import itself; also skip a following newline if present
-        let endCursor = imports[i].end;
+        result += code.slice(cursor, regions[i].start);
+        // skip the declaration itself; also skip a following newline if present
+        let endCursor = regions[i].end;
         if (code[endCursor] === "\n") endCursor++;
         cursor = endCursor;
       }

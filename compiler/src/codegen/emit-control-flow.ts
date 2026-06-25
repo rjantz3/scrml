@@ -186,6 +186,19 @@ interface IfOpts {
    * byte-identical pre-fix emission.
    */
   scopeVar?: string | null;
+  /**
+   * Issue #1 (b2bf9959 follow-on, ss19 #8) — sibling server-fn peer names +
+   * the bare-peer-call accumulator, threaded through the if CONDITION ctx +
+   * if/else BODY opts. A server-fn -> sibling-server-fn call appearing inside
+   * an `if (...)` condition or body must lower to `await <peer>(...)` (the
+   * peer is async); a peer call in a non-awaitable sync-callback position is
+   * recorded for the E-SERVER-FN-IN-SYNC-CALLBACK diagnostic. Without this the
+   * control-flow dispatch dropped serverFnNames, so the call emitted a BARE
+   * unawaited Promise -> silent-wrong comparison/branch (an auth hash compared
+   * against a Promise never matches).
+   */
+  serverFnNames?: Set<string> | null;
+  syncPeerCalls?: Array<{ name: string; span: unknown }> | null;
 }
 
 // §51.5 — Machine binding info for transition guard emission in rewriteBlockBody
@@ -304,7 +317,7 @@ export function emitIfStmt(node: any, opts: IfOpts = {}): string {
 
 function _emitIfStmtInner(node: any, opts: IfOpts = {}): string {
   const lines: string[] = [];
-  const _ifExprCtx: EmitExprContext = { mode: "client", derivedNames: opts.derivedNames ?? null, synthCellKeys: opts.synthCellKeys ?? null, requestIds: opts.requestIds ?? null };
+  const _ifExprCtx: EmitExprContext = { mode: opts.boundary === "server" ? "server" : "client", derivedNames: opts.derivedNames ?? null, synthCellKeys: opts.synthCellKeys ?? null, requestIds: opts.requestIds ?? null, serverFnNames: opts.serverFnNames ?? null, syncPeerCalls: opts.syncPeerCalls ?? null };
   const _ifCond = emitExprField(node.condExpr, node.condition ?? node.test ?? "true", _ifExprCtx);
   lines.push(`if (${_ifCond}) {`);
 
@@ -345,6 +358,9 @@ function _emitIfStmtInner(node: any, opts: IfOpts = {}): string {
     // falls back to the §36 registry (the SPEC §6.7.7 Example 1 else-if arm).
     ...(opts.requestIds ? { requestIds: opts.requestIds } : {}),
     scopeVar: opts.scopeVar ?? null,
+    // ss19 #8 — peer-call threading into the if/else body (see IfOpts).
+    ...(opts.serverFnNames ? { serverFnNames: opts.serverFnNames } : {}),
+    ...(opts.syncPeerCalls ? { syncPeerCalls: opts.syncPeerCalls } : {}),
   };
 
   if (hasFragmentedLiftBody(consequent)) {
@@ -406,7 +422,10 @@ export function emitForStmt(
     // <h1>${<#feed>.data}</h1> } }` body routes the `<#feed>` ref to the
     // reactive `_scrml_request_feed` object (Seam 2) rather than the §36
     // input-state registry. Mirrors the if-stmt threading. null = no request.
-    requestIds?: Set<string> | null },
+    requestIds?: Set<string> | null;
+    // ss19 #8 — peer-call threading (see IfOpts).
+    serverFnNames?: Set<string> | null;
+    syncPeerCalls?: Array<{ name: string; span: unknown }> | null },
 ): string {
   // S213 ss15 item 3 — activate the file's `<request>` id set for the loop's
   // lift bodies + iterable expr (Seam 2). File-global; nested same-set pushes
@@ -453,14 +472,14 @@ function _emitForStmtInner(
     const cStyleMatch = iterable.match(/^\(\s*(.*?)\s*;\s*(.*?)\s*;\s*(.*?)\s*\)$/s);
     if (cStyleMatch) {
       const _cParts = node.cStyleParts;
-      const _cCtx: EmitExprContext = { mode: "client" };
+      const _cCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null };
       const init = emitExprField(_cParts?.initExpr, cStyleMatch[1].trim().replace(/\s*\+\s*\+/g, "++").replace(/\s*-\s*-/g, "--"), _cCtx);
       const cond = emitExprField(_cParts?.condExpr, cStyleMatch[2].trim(), _cCtx);
       const update = emitExprField(_cParts?.updateExpr, cStyleMatch[3].trim().replace(/\s*\+\s*\+/g, "++").replace(/\s*-\s*-/g, "--"), _cCtx);
       lines.push(`for (${init}; ${cond}; ${update}) {`);
 
       const body: any[] = node.body ?? [];
-      for (const code of emitLogicBody(body, { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells } as any)) {
+      for (const code of emitLogicBody(body, { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, syncPeerCalls: opts?.syncPeerCalls } as any)) {
         lines.push(`  ${code}`);
       }
       lines.push(`}`);
@@ -582,7 +601,7 @@ function _emitForStmtInner(
   }
 
   // Non-reactive path — plain for loop
-  const _plainForCtx: EmitExprContext = { mode: "client" };
+  const _plainForCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null };
   iterable = emitExprField(node.iterExpr, iterable, _plainForCtx);
   lines.push(`for (const ${varName} of ${iterable}) {`);
 
@@ -594,7 +613,7 @@ function _emitForStmtInner(
       lines.push(`  ${liftCode}`);
     }
   } else {
-    for (const code of emitLogicBody(body, { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells } as any)) {
+    for (const code of emitLogicBody(body, { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, syncPeerCalls: opts?.syncPeerCalls } as any)) {
       lines.push(`  ${code}`);
     }
   }
@@ -784,7 +803,7 @@ function emitHoistedForStmt(node: any, hoist: any, dbVar: string): string {
 /**
  * Emit a while statement, optionally with a label prefix.
  */
-export function emitWhileStmt(node: any, opts?: { declaredNames?: Set<string>; insideFunctionBody?: boolean; boundary?: "client" | "server"; channelOwnedCells?: Set<string> | null }): string {
+export function emitWhileStmt(node: any, opts?: { declaredNames?: Set<string>; insideFunctionBody?: boolean; boundary?: "client" | "server"; channelOwnedCells?: Set<string> | null; serverFnNames?: Set<string> | null; syncPeerCalls?: Array<{ name: string; span: unknown }> | null }): string {
   // R25-Bug-42 (S138): thread `boundary` through to the body emission so
   // SQL-bearing statements (`yield ?{...}`, `return ?{...}`, etc.) inside a
   // `while` body parse-time-attached sqlNode are emitted via the server
@@ -795,11 +814,11 @@ export function emitWhileStmt(node: any, opts?: { declaredNames?: Set<string>; i
   // which emitted `yield null; // SQL — client cannot evaluate _scrml_sql`
   // inside SSE generator bodies.
   const lines: string[] = [];
-  const _whileCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client" };
+  const _whileCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null };
   const condition = emitExprField(node.condExpr, node.condition ?? "true", _whileCtx);
   const label = node.label ? `${node.label}: ` : "";
   lines.push(`${label}while (${condition}) {`);
-  for (const code of emitLogicBody(node.body ?? [], { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells } as any)) {
+  for (const code of emitLogicBody(node.body ?? [], { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, syncPeerCalls: opts?.syncPeerCalls } as any)) {
     lines.push(`  ${code}`);
   }
   lines.push(`}`);
@@ -813,15 +832,15 @@ export function emitWhileStmt(node: any, opts?: { declaredNames?: Set<string>; i
 /**
  * Emit a do-while statement.
  */
-export function emitDoWhileStmt(node: any, opts?: { declaredNames?: Set<string>; insideFunctionBody?: boolean; boundary?: "client" | "server"; channelOwnedCells?: Set<string> | null }): string {
+export function emitDoWhileStmt(node: any, opts?: { declaredNames?: Set<string>; insideFunctionBody?: boolean; boundary?: "client" | "server"; channelOwnedCells?: Set<string> | null; serverFnNames?: Set<string> | null; syncPeerCalls?: Array<{ name: string; span: unknown }> | null }): string {
   // R25-Bug-42 (S138): thread `boundary` through to body emission. See
   // emitWhileStmt comment above.
   const lines: string[] = [];
-  const _doWhileCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client" };
+  const _doWhileCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null };
   const condition = emitExprField(node.condExpr, node.condition ?? "true", _doWhileCtx);
   const label = node.label ? `${node.label}: ` : "";
   lines.push(`${label}do {`);
-  for (const code of emitLogicBody(node.body ?? [], { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells } as any)) {
+  for (const code of emitLogicBody(node.body ?? [], { declaredNames: opts?.declaredNames, insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, syncPeerCalls: opts?.syncPeerCalls } as any)) {
     lines.push(`  ${code}`);
   }
   lines.push(`} while (${condition});`);

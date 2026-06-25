@@ -355,6 +355,127 @@ describe("S8b: RI auto-escalates auth for protect= fields", () => {
 });
 
 // ---------------------------------------------------------------------------
+// S8c: RI auth precedence (ss19 #6/#7 — the login-wall bug)
+//
+// An EXPLICIT auth= declaration (on <program> OR <page>) MUST win over the
+// protect= auto-escalation in Step 8b. Before the fix, a file with protect=
+// fields was unconditionally escalated to auth="required" + W-AUTH-001 unless
+// it was registered in Step 8a (which only handles <program auth="required">).
+// That wrongly overrode <page auth="optional"|"none"> (and <program> non-
+// required modes), force-installing _scrml_auth_check on e.g. a login page's
+// own RPC — which 302'd to /login, making the page unauthenticatable.
+//
+// Precedence matrix exercised here: {optional, none, required, absent}
+// x {program-level, page-level} x {protect= present}.
+// ---------------------------------------------------------------------------
+
+function authAttr(value) {
+  return { name: "auth", value: { kind: "string-literal", value } };
+}
+function strAttr(name, value) {
+  return { name, value: { kind: "string-literal", value } };
+}
+function pageNode(attrs = []) {
+  return makeMarkupNode("page", attrs, []);
+}
+
+describe("S8c: RI auth precedence — explicit auth= wins over protect= escalation", () => {
+  const FP = "/test/login.scrml";
+  const pa = () => makeProtectAnalysis(FP, "users", ["label"]);
+
+  // --- program-level auth= (carried on authConfig) ---
+
+  test("<program auth=\"optional\"> + protect= — NOT escalated, no W-AUTH-001", () => {
+    const file = makeFileAST(FP, [], {
+      authConfig: { auth: "optional", loginRedirect: "/login", csrf: "off", sessionExpiry: "1h" },
+    });
+    const result = runRI({ files: [file], protectAnalysis: pa() });
+    expect(result.routeMap.authMiddleware.has(FP)).toBe(false);
+    expect(result.errors.find(e => e.code === "W-AUTH-001")).toBeUndefined();
+  });
+
+  test("<program auth=\"none\"> + protect= — NOT escalated, no W-AUTH-001", () => {
+    const file = makeFileAST(FP, [], {
+      authConfig: { auth: "none", loginRedirect: "/login", csrf: "off", sessionExpiry: "1h" },
+    });
+    const result = runRI({ files: [file], protectAnalysis: pa() });
+    expect(result.routeMap.authMiddleware.has(FP)).toBe(false);
+    expect(result.errors.find(e => e.code === "W-AUTH-001")).toBeUndefined();
+  });
+
+  test("<program auth=\"required\"> + protect= — gated (8a), no W-AUTH-001", () => {
+    const file = makeFileAST(FP, [], {
+      authConfig: { auth: "required", loginRedirect: "/signin", csrf: "off", sessionExpiry: "2h" },
+    });
+    const result = runRI({ files: [file], protectAnalysis: pa() });
+    const mw = result.routeMap.authMiddleware.get(FP);
+    expect(mw).toBeDefined();
+    expect(mw.auth).toBe("required");
+    expect(mw.loginRedirect).toBe("/signin"); // program's own settings, not escalation defaults
+    expect(mw.autoEscalated).toBeUndefined();
+    expect(result.errors.find(e => e.code === "W-AUTH-001")).toBeUndefined();
+  });
+
+  // --- page-level auth= (read directly from the <page> markup node) ---
+
+  test("<page auth=\"optional\"> + protect= — NOT escalated, no W-AUTH-001 (#6/#7)", () => {
+    const file = makeFileAST(FP, [pageNode([authAttr("optional")])]);
+    const result = runRI({ files: [file], protectAnalysis: pa() });
+    expect(result.routeMap.authMiddleware.has(FP)).toBe(false);
+    expect(result.errors.find(e => e.code === "W-AUTH-001")).toBeUndefined();
+  });
+
+  test("<page auth=\"none\"> + protect= — NOT escalated, no W-AUTH-001", () => {
+    const file = makeFileAST(FP, [pageNode([authAttr("none")])]);
+    const result = runRI({ files: [file], protectAnalysis: pa() });
+    expect(result.routeMap.authMiddleware.has(FP)).toBe(false);
+    expect(result.errors.find(e => e.code === "W-AUTH-001")).toBeUndefined();
+  });
+
+  test("<page auth=\"required\"> + protect= — gated, no W-AUTH-001 (explicit)", () => {
+    const file = makeFileAST(FP, [pageNode([authAttr("required")])]);
+    const result = runRI({ files: [file], protectAnalysis: pa() });
+    const mw = result.routeMap.authMiddleware.get(FP);
+    expect(mw).toBeDefined();
+    expect(mw.auth).toBe("required");
+    // Explicit page-level declaration — NOT an auto-escalation.
+    expect(mw.autoEscalated).toBeUndefined();
+    // No W-AUTH-001: the page HAS an explicit auth= attribute.
+    expect(result.errors.find(e => e.code === "W-AUTH-001")).toBeUndefined();
+  });
+
+  test("<page auth=\"required\" loginRedirect=> + protect= — page's loginRedirect honoured", () => {
+    const file = makeFileAST(FP, [pageNode([authAttr("required"), strAttr("loginRedirect", "/signin"), strAttr("csrf", "off")])]);
+    const result = runRI({ files: [file], protectAnalysis: pa() });
+    const mw = result.routeMap.authMiddleware.get(FP);
+    expect(mw).toBeDefined();
+    expect(mw.loginRedirect).toBe("/signin");
+    expect(mw.csrf).toBe("off");
+  });
+
+  // --- absent auth= (the case W-AUTH-001 is actually meant for) ---
+
+  test("absent auth= + protect= — STILL auto-escalates + W-AUTH-001 (preserved)", () => {
+    const file = makeFileAST(FP, []);
+    const result = runRI({ files: [file], protectAnalysis: pa() });
+    const mw = result.routeMap.authMiddleware.get(FP);
+    expect(mw).toBeDefined();
+    expect(mw.auth).toBe("required");
+    expect(mw.autoEscalated).toBe(true);
+    expect(result.errors.find(e => e.code === "W-AUTH-001")).toBeDefined();
+  });
+
+  // --- sanity: explicit non-required auth= WITHOUT protect= ---
+
+  test("<page auth=\"optional\"> WITHOUT protect= — no authMiddleware, no warning", () => {
+    const file = makeFileAST(FP, [pageNode([authAttr("optional")])]);
+    const result = runRI({ files: [file], protectAnalysis: null });
+    expect(result.routeMap.authMiddleware.has(FP)).toBe(false);
+    expect(result.errors.find(e => e.code === "W-AUTH-001")).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // S9-S16: CG code generation
 // ---------------------------------------------------------------------------
 

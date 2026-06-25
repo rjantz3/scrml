@@ -430,3 +430,124 @@ ${body}
     expect(readFileSync(serverJsPath, "utf-8")).toMatch(/async function lookup\(/);
   });
 });
+
+
+// ---------------------------------------------------------------------------
+// ss19 #8 (g-pure-fn-rpc-async-unawaited) — peer-call await-threading through
+// CONTROL FLOW + RECEIVER positions.
+//
+// b2bf9959 threaded `await <peer>()` only through the DIRECT statement emit of a
+// server-fn body. A peer call appearing inside an `if`/`for`/`while`/`do-while`
+// CONDITION or BODY dropped serverFnNames (emit-logic's control-flow dispatch +
+// emit-control-flow's ctx construction built a fresh client-mode ctx), so the
+// call emitted a BARE unawaited Promise -> silent-wrong (a `!=` against a Promise
+// is always true; a `.ok` on a Promise is undefined). Additionally, a peer call
+// used as a RECEIVER (`peer().field`) lowered to `await peer().field`, which
+// parses as `await (peer().field)` — awaiting the wrong thing; it must be wrapped
+// `(await peer()).field`. Both are silent-correctness defects (green compile,
+// `node --check` clean) in the same lowering machinery as Issue #1.
+// ---------------------------------------------------------------------------
+
+describe("ss19 #8 — peer-call await threading through control flow + receivers", () => {
+  const ITEMS = { "items.db": ["CREATE TABLE items (id INTEGER PRIMARY KEY, label TEXT)"] };
+  const wrap = (body) => `<program>
+<db src="./items.db" tables="items">
+  \${
+    fn norm(s: string) -> string { return s }
+    server function lookup(x) { const r = ?{\`SELECT id, label FROM items WHERE id = \${x}\`}.get(); return { label: r is some ? r.label : "", ok: r is some } }
+${body}
+  }
+  <button onclick=caller(1)>Go</button>
+</>
+</program>`;
+
+  test("peer call in if/for/while/return + member-receiver all await-wrapped; output parses", () => {
+    const caller = `    server function caller(x) {
+      ?{\`INSERT INTO items (id, label) VALUES (1, 'a')\`}.run()
+      let out = ""
+      if (lookup(x).ok) { out = "hit" }
+      for (const i of [1, 2]) { const e = lookup(i).ok; out = out }
+      let n = 0
+      while (n < 1) { const w = lookup(x).label; n = n + 1 }
+      return { out: out, done: lookup(x).ok, t: norm(out) }
+    }`;
+    const { errors, serverJsPath } = compileToFiles(wrap(caller), "ss19-8-shape", ITEMS);
+    // No malformed-output / codegen errors (the receiver mis-grouping was a
+    // silent miscompile, but the structural threading gap could also produce
+    // unparseable output in some shapes — assert clean either way).
+    expect(errors.filter((e) => !e.code?.startsWith("W-"))).toEqual([]);
+    const js = readFileSync(serverJsPath, "utf-8");
+
+    // if-condition: member access on a peer result → (await lookup(x)).ok
+    expect(js).toContain("if ((await lookup(x)).ok)");
+    // for-body: peer call awaited + receiver-wrapped
+    expect(js).toContain("const e = (await lookup(i)).ok;");
+    // while-body: peer call awaited + receiver-wrapped
+    expect(js).toContain("const w = (await lookup(x)).label;");
+    // return statement: member access on peer result wrapped
+    expect(js).toContain("(await lookup(x)).ok");
+    // pure-fn peer in return value (no member access) → bare await, NO spurious wrap
+    expect(js).toContain("await norm(out)");
+    expect(js).not.toContain("(await norm(out))");
+
+    // CRITICAL: no BARE unawaited peer call survives in these positions.
+    expect(js).not.toMatch(/if \(lookup\(x\)\.ok\)/);
+    expect(js).not.toMatch(/const e = lookup\(i\)\.ok;/);
+    // and the mis-grouped receiver form must NOT appear.
+    expect(js).not.toContain("await lookup(x).ok");
+    expect(js).not.toContain("await lookup(i).ok");
+  });
+
+  test("runtime: a pure-fn comparison inside `if` resolves the value, not a Promise (silent-wrong fix)", async () => {
+    // happy-dom-polluted globals strip the CSRF headers (see the Issue #1 runtime
+    // test). Skip the live round-trip there — the emit-shape test guards it.
+    if (typeof globalThis.document !== "undefined") return;
+
+    const SRC = `<program>
+<db src="./items.db" tables="items">
+  \${
+    fn norm(s: string) -> string { return s }
+    server function check(name) {
+      const row = ?{\`SELECT id, label FROM items WHERE label = \${name}\`}.get()
+      if (row is not) { return { miss: true } }
+      if (row.label != norm(name)) { return { mismatch: true } }
+      return { ok: true }
+    }
+  }
+  <button onclick=check("alpha")>Go</button>
+</>
+</program>`;
+    const SEED = { "items.db": ["CREATE TABLE items (id INTEGER PRIMARY KEY, label TEXT)", "INSERT INTO items (id, label) VALUES (1, 'alpha')"] };
+    const { errors, serverJsPath, tmpDir } = compileToFiles(SRC, "ss19-8-runtime", SEED);
+    expect(errors.filter((e) => !e.code?.startsWith("W-"))).toEqual([]);
+
+    const js = readFileSync(serverJsPath, "utf-8");
+    // The comparison operand must be the AWAITED value (the post-fix shape).
+    expect(js).toContain("await norm(name)");
+
+    const absDbPath = resolve(tmpDir, "items.db");
+    const patched = js.replace(
+      'const _scrml_sql = new SQL("sqlite:./items.db");',
+      `const _scrml_sql = new SQL(${JSON.stringify("sqlite:" + absDbPath)});`,
+    );
+    writeFileSync(serverJsPath, patched);
+
+    const mod = await import(`file://${serverJsPath}?v=${Date.now()}-${Math.random()}`);
+    const route = Object.values(mod).find(
+      (v) => v && typeof v === "object" && typeof v.path === "string" && v.path.includes("check"),
+    );
+    expect(route).toBeDefined();
+
+    const TOKEN = "ss19-8-csrf";
+    const req = new Request(`http://localhost${route.path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": TOKEN, "Cookie": `scrml_csrf=${TOKEN}` },
+      body: JSON.stringify({ name: "alpha" }),
+    });
+    const resp = await route.handler(req);
+    expect(resp.status).toBe(200);
+    // row.label ("alpha") == norm("alpha") ("alpha") → {ok:true}. The pre-fix bug
+    // compared "alpha" against a Promise → always {mismatch:true}.
+    expect(await resp.json()).toEqual({ ok: true });
+  });
+});

@@ -6,7 +6,7 @@
  * redirect-SCOPING/SCOPING.md §5).
  *
  * Sections:
- *  §1  Trivial generate — empty CWD writes pages/auth/login.scrml.
+ *  §1  Trivial generate — empty CWD writes pages/login.scrml.
  *  §2  Idempotency — running twice does not clobber the first write.
  *  §3  --target / --target-dir overrides — output location respects flags.
  *  §4  DB integration — <db src="..."> in app.scrml propagates into template.
@@ -90,15 +90,15 @@ describe("§1 trivial generate auth", () => {
   beforeEach(setupTmp);
   afterEach(teardownTmp);
 
-  test("empty CWD writes pages/auth/login.scrml", async () => {
+  test("empty CWD writes pages/login.scrml", async () => {
     await runGenerateInTmp(["auth"]);
-    const out = join(tmpDir, "pages", "auth", "login.scrml");
+    const out = join(tmpDir, "pages", "login.scrml");
     expect(existsSync(out)).toBe(true);
   });
 
   test("generated file contains canonical scrml login primitives", async () => {
     await runGenerateInTmp(["auth"]);
-    const src = readFileSync(join(tmpDir, "pages", "auth", "login.scrml"), "utf8");
+    const src = readFileSync(join(tmpDir, "pages", "login.scrml"), "utf8");
     // <page auth="optional"> override is load-bearing — without it the
     // global auth gate would loop on /login.
     expect(src).toContain(`<page auth="optional">`);
@@ -125,7 +125,7 @@ describe("§2 idempotency", () => {
 
   test("running twice does not clobber the first write", async () => {
     await runGenerateInTmp(["auth"]);
-    const target = join(tmpDir, "pages", "auth", "login.scrml");
+    const target = join(tmpDir, "pages", "login.scrml");
     expect(existsSync(target)).toBe(true);
 
     // Mutate the file so we can detect clobber.
@@ -153,7 +153,7 @@ describe("§3 target overrides", () => {
     await runGenerateInTmp(["auth", "--target=./login.scrml"]);
     expect(existsSync(join(tmpDir, "login.scrml"))).toBe(true);
     // Default path NOT used.
-    expect(existsSync(join(tmpDir, "pages", "auth", "login.scrml"))).toBe(false);
+    expect(existsSync(join(tmpDir, "pages", "login.scrml"))).toBe(false);
   });
 
   test("--target-dir=<dir> writes login.scrml into that dir", async () => {
@@ -178,7 +178,7 @@ describe("§4 db src detection", () => {
       "utf8",
     );
     await runGenerateInTmp(["auth"]);
-    const src = readFileSync(join(tmpDir, "pages", "auth", "login.scrml"), "utf8");
+    const src = readFileSync(join(tmpDir, "pages", "login.scrml"), "utf8");
     // The <db src=> in the generated file should now point at ./contacts.db,
     // not the template's placeholder ./app.db.
     expect(src).toContain(`<db src="./contacts.db"`);
@@ -188,7 +188,7 @@ describe("§4 db src detection", () => {
   test("project without <db> falls back to placeholder app.db", async () => {
     // No app.scrml at all → no DB detected → placeholder retained.
     await runGenerateInTmp(["auth"]);
-    const src = readFileSync(join(tmpDir, "pages", "auth", "login.scrml"), "utf8");
+    const src = readFileSync(join(tmpDir, "pages", "login.scrml"), "utf8");
     expect(src).toContain(`<db src="./app.db"`);
   });
 });
@@ -210,7 +210,7 @@ describe("§5 error paths", () => {
   test("--help prints usage and writes nothing", async () => {
     const { logs } = await runGenerateInTmp(["--help"]);
     expect(logs.join("\n")).toContain("scrml generate");
-    expect(existsSync(join(tmpDir, "pages", "auth", "login.scrml"))).toBe(false);
+    expect(existsSync(join(tmpDir, "pages", "login.scrml"))).toBe(false);
   });
 });
 
@@ -224,7 +224,7 @@ describe("§6 template content quality", () => {
 
   test("generated template uses safe failure paths (no try/catch)", async () => {
     await runGenerateInTmp(["auth"]);
-    const src = readFileSync(join(tmpDir, "pages", "auth", "login.scrml"), "utf8");
+    const src = readFileSync(join(tmpDir, "pages", "login.scrml"), "utf8");
     // No try/catch in canonical scrml.
     expect(src).not.toMatch(/\btry\s*\{/);
     expect(src).not.toMatch(/\bcatch\b/);
@@ -233,7 +233,7 @@ describe("§6 template content quality", () => {
 
   test("generated template uses `is not` and `not` for absence, not null/undefined", async () => {
     await runGenerateInTmp(["auth"]);
-    const src = readFileSync(join(tmpDir, "pages", "auth", "login.scrml"), "utf8");
+    const src = readFileSync(join(tmpDir, "pages", "login.scrml"), "utf8");
     // S89 absolute rule.
     expect(src).not.toMatch(/\bnull\b/);
     expect(src).not.toMatch(/\bundefined\b/);
@@ -243,7 +243,7 @@ describe("§6 template content quality", () => {
 
   test("generated template imports verifyPassword from scrml:auth (not raw bcrypt etc.)", async () => {
     await runGenerateInTmp(["auth"]);
-    const src = readFileSync(join(tmpDir, "pages", "auth", "login.scrml"), "utf8");
+    const src = readFileSync(join(tmpDir, "pages", "login.scrml"), "utf8");
     expect(src).toMatch(/import\s+\{\s*verifyPassword\s*\}\s+from\s+'scrml:auth'/);
   });
 });
@@ -256,7 +256,7 @@ describe("§7 non-default loginRedirect derives scaffold output path", () => {
   beforeEach(setupTmp);
   afterEach(teardownTmp);
 
-  test("`<program loginRedirect=\"/signin\">` writes scaffold to pages/signin.scrml (not pages/auth/login.scrml)", async () => {
+  test("`<program loginRedirect=\"/signin\">` writes scaffold to pages/signin.scrml (not pages/login.scrml)", async () => {
     writeFileSync(
       join(tmpDir, "app.scrml"),
       `<program auth="required" loginRedirect="/signin">\n  <div><h1>Hi</h1></div>\n</program>\n`,
@@ -267,7 +267,7 @@ describe("§7 non-default loginRedirect derives scaffold output path", () => {
     // Scaffold lands at the redirect-derived path.
     expect(existsSync(join(tmpDir, "pages", "signin.scrml"))).toBe(true);
     // NOT at the default path.
-    expect(existsSync(join(tmpDir, "pages", "auth", "login.scrml"))).toBe(false);
+    expect(existsSync(join(tmpDir, "pages", "login.scrml"))).toBe(false);
   });
 
   test("`<program loginRedirect=\"/account/login\">` derives nested path pages/account/login.scrml", async () => {
@@ -279,11 +279,12 @@ describe("§7 non-default loginRedirect derives scaffold output path", () => {
     await runGenerateInTmp(["auth"]);
 
     expect(existsSync(join(tmpDir, "pages", "account", "login.scrml"))).toBe(true);
-    expect(existsSync(join(tmpDir, "pages", "auth", "login.scrml"))).toBe(false);
+    expect(existsSync(join(tmpDir, "pages", "login.scrml"))).toBe(false);
   });
 
-  test("default `<program auth=\"required\">` (no explicit loginRedirect) still writes pages/auth/login.scrml", async () => {
-    // Verifies the default path is preserved when loginRedirect is implicit.
+  test("default `<program auth=\"required\">` (no explicit loginRedirect) writes pages/login.scrml", async () => {
+    // Verifies the default scaffold lands at pages/login.scrml (route /login
+    // per SPEC §52.13 default + §47.9.2 path-preserve), matching loginRedirect=/login.
     writeFileSync(
       join(tmpDir, "app.scrml"),
       `<program auth="required">\n  <div></div>\n</program>\n`,
@@ -291,13 +292,13 @@ describe("§7 non-default loginRedirect derives scaffold output path", () => {
     );
     await runGenerateInTmp(["auth"]);
 
-    expect(existsSync(join(tmpDir, "pages", "auth", "login.scrml"))).toBe(true);
-    expect(existsSync(join(tmpDir, "pages", "login.scrml"))).toBe(false);
+    expect(existsSync(join(tmpDir, "pages", "login.scrml"))).toBe(true);
+    expect(existsSync(join(tmpDir, "pages", "auth", "login.scrml"))).toBe(false);
   });
 
-  test("explicit `<program loginRedirect=\"/login\">` (same as default) writes pages/auth/login.scrml", async () => {
-    // Explicit override that matches the default should still use the
-    // canonical pages/auth/login.scrml path (not pages/login.scrml).
+  test("explicit `<program loginRedirect=\"/login\">` (same as default) writes pages/login.scrml", async () => {
+    // Explicit override that matches the default resolves to the same
+    // canonical pages/login.scrml path (route /login per §52.13 + §47.9.2).
     writeFileSync(
       join(tmpDir, "app.scrml"),
       `<program auth="required" loginRedirect="/login">\n  <div></div>\n</program>\n`,
@@ -305,8 +306,8 @@ describe("§7 non-default loginRedirect derives scaffold output path", () => {
     );
     await runGenerateInTmp(["auth"]);
 
-    expect(existsSync(join(tmpDir, "pages", "auth", "login.scrml"))).toBe(true);
-    expect(existsSync(join(tmpDir, "pages", "login.scrml"))).toBe(false);
+    expect(existsSync(join(tmpDir, "pages", "login.scrml"))).toBe(true);
+    expect(existsSync(join(tmpDir, "pages", "auth", "login.scrml"))).toBe(false);
   });
 
   test("explicit `--target` overrides loginRedirect-derived path", async () => {

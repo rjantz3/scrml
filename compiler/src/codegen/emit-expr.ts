@@ -957,8 +957,39 @@ function receiverNeedsParens(node: ExprNode): boolean {
   }
 }
 
+/**
+ * Issue #1 (b2bf9959 follow-on, ss19 #8) — does this call node lower to an
+ * `await <peer>(...)` form? True iff emitCall's server-fn -> sibling-server-fn
+ * peer-call branch (below) fires AND the position is awaitable (`peerAwaitable
+ * !== false`). A `peerAwaitable === false` (sync-callback / param-default)
+ * position emits a BARE call (a primary), so it is NOT an await form. Used both
+ * by emitCall (the lowering decision) and emitReceiver (to wrap the await form
+ * in grouping parens when the call is a receiver — without the wrap,
+ * `await peer().found` mis-parses as `await (peer().found)`, awaiting the wrong
+ * thing → silent-wrong, the receiver-position sibling of the bare-call bug).
+ */
+function isAwaitedPeerCall(node: ExprNode, ctx: EmitExprContext): boolean {
+  if (node.kind !== "call") return false;
+  const call = node as CallExpr;
+  return (
+    ctx.mode === "server" &&
+    !call.optional &&
+    call.callee.kind === "ident" &&
+    typeof (call.callee as { name?: unknown }).name === "string" &&
+    ctx.serverFnNames != null &&
+    ctx.serverFnNames.has((call.callee as { name: string }).name) &&
+    !(ctx.declaredNames != null && ctx.declaredNames.has((call.callee as { name: string }).name)) &&
+    ctx.peerAwaitable !== false
+  );
+}
+
 function emitReceiver(node: ExprNode, ctx: EmitExprContext): string {
   const s = emitExpr(node, ctx);
+  // An awaited peer call (`await peer(...)`) is an await-expression (unary
+  // precedence) — looser than member/index/call/new — so as a receiver it MUST
+  // be wrapped: `(await peer(...)).field`. receiverNeedsParens treats a plain
+  // call as a primary (correct pre-await), so this case needs its own guard.
+  if (isAwaitedPeerCall(node, ctx)) return `(${s})`;
   return receiverNeedsParens(node) ? `(${s})` : s;
 }
 
@@ -1795,6 +1826,8 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
     // is a bug, so emit-server raises E-SERVER-FN-IN-SYNC-CALLBACK from this
     // record. This single `peerAwaitable` decision is the source of truth for
     // BOTH the lowering and the diagnostic (no second classifier to drift).
+    // (`isAwaitedPeerCall` mirrors this exact condition + `peerAwaitable !==
+    // false` so emitReceiver can wrap an await form used as a receiver.)
     if (ctx.peerAwaitable === false) {
       if (ctx.syncPeerCalls) ctx.syncPeerCalls.push({ name: node.callee.name, span: node.span });
       return `${callee}(${args})`;
